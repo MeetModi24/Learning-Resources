@@ -196,21 +196,48 @@ go deep, rather than collecting clones.
   and liquidity constraints; then run ablations for features, HMM gate, model, and sizing. This turns a
   broad course project into defensible research.
 
-#### Open-source comparisons and building blocks for #17
+#### Comparable complete projects at roughly the same difficulty
 
-| Repository | Why it is useful | How to use it |
-|---|---|---|
-| [microsoft/qlib](https://github.com/microsoft/qlib) — ⭐48,752 · MIT | Mature cross-sectional research workflow with LightGBM, Alpha158/360, IC/Rank-IC/ICIR, model comparisons, and cost-aware portfolio backtests | Use as the evaluation contract; port the NSE panel into Qlib and reproduce every headline metric |
-| [Caie777/end-to-end-stock-transformer](https://github.com/Caie777/end-to-end-stock-transformer) — ⭐13 · MIT | Closest research analogue: Transformer vs LightGBM for cross-sectional A-share returns with rolling OOS tests, IC/Rank-IC, turnover, seeds, and robustness notes | Borrow its experiment/config discipline and multi-seed reporting; do not copy its China-specific data assumptions |
-| [thuml/iTransformer](https://github.com/thuml/iTransformer) — ⭐2,216 · MIT | Official iTransformer implementation and paper code | Use to validate that the model architecture is faithful; finance-specific labeling and leakage controls remain your responsibility |
-| [Vraj3005/NF-LRD](https://github.com/Vraj3005/NF-LRD) — ⭐0 · no license | Nifty 50 HMM/GMM/MSR regime research with walk-forward testing, cost/slippage assumptions, Monte Carlo risk, tests, and Streamlit | Read as an India-specific regime/dashboard comparison; reimplement ideas because the repo has no reuse license |
-| [Jevik-R/portfolio-ai](https://github.com/Jevik-R/portfolio-ai) — ⭐0 · MIT | NSE pipeline with CVaR/Black-Litterman allocation, walk-forward backtesting, macro overlay, and Streamlit | Reference for portfolio/risk UI structure; its 16-stock universe and sentiment signal are much narrower than #17 |
-| [skfolio/skfolio](https://github.com/skfolio/skfolio) — ⭐2,428 · BSD-3-Clause | Production-quality portfolio optimization with walk-forward and combinatorial-purged CV, CVaR, transaction-cost, turnover, and weight constraints | Replace hand-rolled risk allocation where appropriate and benchmark Half-Kelly against constrained CVaR/risk-budgeting portfolios |
+These are end-to-end projects, not model libraries or framework building blocks. Each has data,
+features/models, validation or backtesting, risk/portfolio analysis, and an application or complete
+research output.
 
-> License note: “public on GitHub” does not automatically permit copying. The Project Aegis and
-> NF-LRD repositories had no detected license when checked; study them, but do not reuse their code
-> without permission. Qlib, iTransformer, the A-share Transformer, PortfolioAI, and skfolio declare
-> permissive licenses as listed above.
+1. **[regime_detection_MVP](https://github.com/m4nn2609-dot/regime_detection_MVP)** — ⭐2 · no license ·
+   Python · active (Aug 2026) — **closest overall match.** Nifty 50 data from `yfinance`, 40+ features,
+   HMM/K-Means/GMM comparison, per-regime LightGBM, time-series splits with a 60-day gap, SHAP,
+   MongoDB, Prophet forecasts, and Streamlit. It is slightly narrower than Project Aegis (50 stocks,
+   no Transformer) but adds explainability and persistence. Caveat: it publishes methodology but no
+   substantive OOS performance table, and its README's clone URL does not match the repository name.
+
+2. **[ml-cross-sectional](https://github.com/matthiola0/ml-cross-sectional)** — ⭐0 · MIT · Python ·
+   active (May 2026) — **closest quant-research match.** Ranks 502 S&P 500 stocks using LightGBM and
+   XGBoost on 12 OHLCV features; includes annual walk-forward evaluation, IC/ICIR, SHAP, long-short
+   quintiles, realistic costs, and sector/beta neutralization. It lacks a dashboard and HMM, but the
+   statistical research is stronger and remains a self-contained project rather than a library.
+   Best extension: port it to point-in-time NSE membership, add causal HMM conditioning, and build the
+   Streamlit diagnostics layer.
+
+3. **[macro_regime](https://github.com/ShrishDhuria/macro_regime)** — ⭐2 · MIT · Python · active
+   (Jun 2026) — **closest regime/risk project.** A modular European cross-asset platform using a
+   three-state HMM, LightGBM, walk-forward allocation, regime-conditional VaR/expected shortfall,
+   stress tests, and Streamlit plus Excel/PowerPoint reports. Comparable engineering scope, with an
+   unusually valuable honest negative result: regime tilting did not add reliable performance.
+
+4. **[AlphaEdge](https://github.com/SORADATA/Alphaedge-quant-analytics)** — ⭐7 · no detected license ·
+   Python · active (Sep 2026) — **upper edge of the target difficulty, but still one coherent project.**
+   CAC 40 data pipeline, Ridge/Logistic/LightGBM/XGBoost ensemble, K-Means regimes, walk-forward model
+   promotion, Black-Litterman + CVaR allocation, transaction-aware monthly rebalancing, Streamlit,
+   tests, and scheduled training. Ignore its optional MLflow/GitHub-Actions layer initially; the core
+   research pipeline is comparable to Project Aegis.
+
+**Best choices:** use `regime_detection_MVP` when you want the nearest stack and learning curve; use
+`ml-cross-sectional` when you want the most interview-defensible alpha research. Do not clone either
+as a portfolio submission—rebuild one on point-in-time NSE data and document every changed assumption.
+
+> License note: “public on GitHub” does not automatically permit copying. Project Aegis,
+> `regime_detection_MVP`, and AlphaEdge had no license detected via GitHub's API when checked; study
+> their design, but do not reuse code without permission. `ml-cross-sectional` and `macro_regime`
+> declare MIT licenses.
 
 ---
 
