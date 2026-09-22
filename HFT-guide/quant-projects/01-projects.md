@@ -170,6 +170,48 @@ go deep, rather than collecting clones.
 - **⚠️ Overrated:** `uberdeveloper/fastbt` (⭐28) is **not** an official Zerodha project despite the
   association job posts imply — genuinely minimal EOD tool.
 
+### 17. Regime-adaptive cross-sectional NSE alpha system 🟡→🔴 ⭐ DIRECT QUANT-RESEARCH FIT
+- **Closest complete project:**
+  https://github.com/shubham21-ai/Regime-Adaptive-Cross-Sectional-Alpha-Model-for-NSE-Equities
+  — ⭐0 · **no license** · Python · active (Apr 2026).
+- **What:** 291 NSE stocks, 11 daily features, LightGBM + iTransformer cross-sectional forecasts,
+  a three-state HMM regime filter, walk-forward evaluation, Half-Kelly sizing, VaR/CVaR controls,
+  ARIMA/SARIMA/VAR comparisons, and a Streamlit research dashboard. The repo reports 0.0223 mean
+  daily Spearman IC and 0.228 ICIR over 467 validation days.
+- **Why it is relevant:** this directly fills the portfolio's alpha-research gap: panel-data feature
+  engineering, cross-sectional ranking, regime conditioning, out-of-sample measurement, portfolio
+  construction, and risk attribution. It is a **systematic-equities / medium-frequency quant project**,
+  not an HFT or low-latency project; pair it with the LOB/C++ work rather than describing it as HFT.
+- **Candid result check:** the repo's own table reports 15.65% annual return and 0.74 Sharpe versus
+  18.85% and 0.856 for Nifty 500. Its strongest evidence is positive OOS IC and lower drawdown
+  (10.82% vs 15.80%), not benchmark-beating returns. Its reported VAR mean IC (+0.027) also exceeds
+  iTransformer (+0.022), so the deep model has not clearly dominated every baseline.
+- **Audit before using the resume claims:** verify point-in-time Nifty membership/delistings
+  (survivorship bias), corporate-action handling, train-only scaling, causal HMM filtering rather than
+  full-sample Viterbi labels, exact purge/embargo logic, ICIR convention, turnover/capacity, and Indian
+  costs (brokerage, STT, exchange fees, impact). Add confidence intervals or a block bootstrap for IC
+  and compare against simple momentum, mean-reversion, linear/ridge, CatBoost, and XGBoost baselines.
+- **Extend into:** rebuild the universe from point-in-time NSE constituent snapshots; use sector- and
+  beta-neutral portfolio construction; report IC decay by horizon/regime/sector; add realistic costs
+  and liquidity constraints; then run ablations for features, HMM gate, model, and sizing. This turns a
+  broad course project into defensible research.
+
+#### Open-source comparisons and building blocks for #17
+
+| Repository | Why it is useful | How to use it |
+|---|---|---|
+| [microsoft/qlib](https://github.com/microsoft/qlib) — ⭐48,752 · MIT | Mature cross-sectional research workflow with LightGBM, Alpha158/360, IC/Rank-IC/ICIR, model comparisons, and cost-aware portfolio backtests | Use as the evaluation contract; port the NSE panel into Qlib and reproduce every headline metric |
+| [Caie777/end-to-end-stock-transformer](https://github.com/Caie777/end-to-end-stock-transformer) — ⭐13 · MIT | Closest research analogue: Transformer vs LightGBM for cross-sectional A-share returns with rolling OOS tests, IC/Rank-IC, turnover, seeds, and robustness notes | Borrow its experiment/config discipline and multi-seed reporting; do not copy its China-specific data assumptions |
+| [thuml/iTransformer](https://github.com/thuml/iTransformer) — ⭐2,216 · MIT | Official iTransformer implementation and paper code | Use to validate that the model architecture is faithful; finance-specific labeling and leakage controls remain your responsibility |
+| [Vraj3005/NF-LRD](https://github.com/Vraj3005/NF-LRD) — ⭐0 · no license | Nifty 50 HMM/GMM/MSR regime research with walk-forward testing, cost/slippage assumptions, Monte Carlo risk, tests, and Streamlit | Read as an India-specific regime/dashboard comparison; reimplement ideas because the repo has no reuse license |
+| [Jevik-R/portfolio-ai](https://github.com/Jevik-R/portfolio-ai) — ⭐0 · MIT | NSE pipeline with CVaR/Black-Litterman allocation, walk-forward backtesting, macro overlay, and Streamlit | Reference for portfolio/risk UI structure; its 16-stock universe and sentiment signal are much narrower than #17 |
+| [skfolio/skfolio](https://github.com/skfolio/skfolio) — ⭐2,428 · BSD-3-Clause | Production-quality portfolio optimization with walk-forward and combinatorial-purged CV, CVaR, transaction-cost, turnover, and weight constraints | Replace hand-rolled risk allocation where appropriate and benchmark Half-Kelly against constrained CVaR/risk-budgeting portfolios |
+
+> License note: “public on GitHub” does not automatically permit copying. The Project Aegis and
+> NF-LRD repositories had no detected license when checked; study them, but do not reuse their code
+> without permission. Qlib, iTransformer, the A-share Transformer, PortfolioAI, and skfolio declare
+> permissive licenses as listed above.
+
 ---
 
 ## Recommended path (do NOT collect all of these)
@@ -179,8 +221,9 @@ go deep, rather than collecting clones.
 3. **India differentiator:** live-NSE-depth LOB reconstructor (#2) — the single most original, hard-to-fake
    piece for an Indian HFT application, and it reuses your Limit-Order-Book repo.
 4. **India platform credibility:** extend OpenAlgo (#13) with one real module.
-5. **Alpha-research leg (closes your biggest gap):** Qlib (#9) or ML-for-trading (#10) + alphalens + your
-   own purged-CV/deflated-Sharpe validation.
+5. **Alpha-research leg (closes your biggest gap):** rebuild the NSE cross-sectional system (#17) on
+   Qlib (#9), with point-in-time membership, purged walk-forward validation, neutralization, IC decay,
+   realistic costs, and multi-seed/model ablations.
 
 Write each up as a `.md` (like your HFT-CPP-Portfolio-Research.md), emphasizing **statistical validation
 and the research loop**, not just the code.
