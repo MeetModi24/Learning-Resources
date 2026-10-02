@@ -7,10 +7,10 @@ if you're new; jump by topic if you're revising.
 ## Part I — Computer Architecture
 
 1. [CA foundations & the ISA](01-ca-foundations-isa.md) — von Neumann, registers, fetch-decode-execute, CISC vs RISC, CPI
-2. [Pipelining](02-pipelining.md) — stages, hazards, forwarding, superscalar / out-of-order
-3. [Branch prediction](03-branch-prediction.md) — predictors, BTB, branch-miss penalty, branch-miss vs cache-miss
-4. [Caches & the memory hierarchy](04-caches-memory-hierarchy.md) — L1/L2/L3, lines, associativity, write policies, the 3 C's
-5. [Cache addressing & coherency](05-cache-addressing-coherency.md) — VIVT/VIPT/PIPT, MESI, flush-on-context-switch
+2. [Pipelining](02-pipelining.md) — stages, hazards, forwarding, register renaming, reservation stations, ROB/retirement, load-store queues, SIMD
+3. [Branch prediction](03-branch-prediction.md) — predictors, BTB, branch-miss penalty, branchless code and SIMD masks
+4. [Caches & the memory hierarchy](04-caches-memory-hierarchy.md) — L1/L2/L3, lines, associativity, the 3 C's, working sets, layout, tiling and prefetch
+5. [Cache addressing & coherency](05-cache-addressing-coherency.md) — VIVT/VIPT/PIPT, MESI, false sharing, NUMA placement and locality
 6. [Virtual memory](06-virtual-memory.md) — MMU, TLB, page-table walk, page faults, demand paging, copy-on-write
 
 ## Part II — Operating Systems
@@ -23,6 +23,7 @@ if you're new; jump by topic if you're revising.
 12. [Allocators & I/O](12-allocators-and-io.md) — malloc/new/free internals, the I/O path, raw sockets
 13. [Scheduling & real-time](13-scheduling-and-realtime.md) — CFS/vruntime, SCHED_FIFO/RR/DEADLINE, nice/priority, RM/EDF, affinity, CPU isolation
 14. [Deadlocks, starvation & livelock](14-deadlocks-starvation-livelock.md) — Coffman conditions, RAG, Banker's, prevention, priority inversion, livelock/backoff
+15. [IPC fundamentals](15-ipc-fundamentals.md) — pipes/FIFOs, message queues, local/network sockets, shared memory, mapped files, zero-copy, SPSC handoff
 
 ## The through-line
 
@@ -32,4 +33,6 @@ if you're new; jump by topic if you're revising.
 > (**virtual memory**). The **OS**, running in a privileged **kernel mode** the hardware enforces,
 > multiplexes that one CPU and that one physical memory across many **processes** and **threads**,
 > switching between them on **interrupts**, entering the kernel on **system calls**, and protecting
-> them from each other. HFT is the art of making every one of those steps predictable and fast.
+> them from each other. Those isolated processes exchange data through kernel transports or
+> deliberately shared pages (**IPC**). HFT is the art of making every one of those steps predictable
+> and fast.

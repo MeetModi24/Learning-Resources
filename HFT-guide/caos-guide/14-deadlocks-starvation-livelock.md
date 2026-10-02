@@ -589,4 +589,4 @@ store.
   lock-free SPSC queues, immutability. Liveness bugs live in the **control plane**, where lock ordering,
   timeouts, priority inheritance, and aging keep them in check.
 
-**Next:** back to the [index](00-index.md)
+**Next:** [Module 15 — IPC fundamentals](15-ipc-fundamentals.md)

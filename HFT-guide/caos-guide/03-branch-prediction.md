@@ -201,9 +201,14 @@ Since you can't make the predictor smarter, you make the code easier to predict 
   code layout so the hot path is the fall-through (better for the front-end / static prediction and
   i-cache), and steer branch-hinting. They tune *layout and static hints*, not the dynamic predictor
   directly.
+- **Use vector masks for data-parallel conditions.** SIMD comparisons produce a per-lane mask, and
+  masked select/store can process both outcomes without one control-flow branch per element. This is
+  valuable for wide regular filters; it is not free—both candidate computations may run, and sparse
+  masks or gather/scatter memory can dominate. It connects branch elimination to the SIMD machinery
+  in Module 02.
 - **Remove indirect branches on the hot path.** Virtual calls and function-pointer tables are
   BTB-predicted indirect branches; a mispredict costs the full penalty. HFT code favors CRTP,
-  `if constexpr`, or `std::variant` dispatch over `virtual` (see the C++ guide, module 17).
+  `if constexpr`, or `std::variant` dispatch over `virtual` (see the C++ guide, Module 19).
 
 The governing rule: **an unpredictable branch on the hot path is a latency bug.** Either make it
 predictable (sort, restructure) or eliminate it (branchless, table lookup).

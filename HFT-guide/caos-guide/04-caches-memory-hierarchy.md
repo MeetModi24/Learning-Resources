@@ -227,7 +227,7 @@ When the CPU *writes*, two orthogonal decisions matter:
 Writes don't even wait for the cache. A core posts stores into a **store buffer** and moves on; the
 store drains to L1 later. This hides write latency but means a core can see its *own* store before
 other cores do — which is exactly the source of memory-reordering subtleties and why you need
-`std::atomic` / fences (C++ guide Module 16). Interviewers love connecting "store buffer" to "why
+`std::atomic` / fences (C++ guide Module 18). Interviewers love connecting "store buffer" to "why
 does `x=1; y=1` become visible out of order to another thread."
 
 ---
@@ -276,6 +276,73 @@ Mnemonic: **compulsory** = first touch, **capacity** = too much data, **conflict
 
 ---
 
+## 10. Cache-aware optimization: working sets, layout, blocking & prefetch
+
+The useful optimization question is not “what is the cache size?” but **which lines does this phase
+touch before it reuses them?** That collection is the working set. If the hot working set fits in
+L1/L2, repeated work stays cheap; if code mixes hot fields with cold metadata, it spends capacity on
+bytes the loop never uses.
+
+### Struct layout and cache-line splits
+
+Natural alignment lets the CPU load scalars efficiently, and compilers insert padding to provide it.
+Reordering fields from larger alignment to smaller often shrinks a record. A hot object that crosses
+a 64-byte boundary may require two line fills, so both `sizeof(T)` and array starting alignment
+matter.
+
+Packed structs are a wire/storage format tool, not a default cache optimization. Removing padding can
+misalign fields, create split loads, and fault on stricter architectures. Decode packed bytes into an
+aligned working representation; use `memcpy`/explicit decoding rather than dereferencing a cast
+pointer.
+
+### AoS, SoA, and hot/cold splitting
+
+Choose layout from the loop:
+
+```text
+AoS: [px qty side][px qty side][px qty side]   good when one loop uses whole records
+SoA: [px px px ...][qty qty qty ...][side...] good when one loop scans one/few fields; SIMD-friendly
+```
+
+Neither layout wins universally. A strong compromise is **hot/cold splitting**: keep price, quantity,
+side, and links compact in the matching record; store rarely read client text/audit metadata in a
+side table keyed by order ID.
+
+### Blocking / tiling
+
+When an algorithm repeatedly combines large arrays or matrices, process a tile that fits in cache
+before advancing. Tiling changes reuse distance: a line is reused while still resident instead of
+after the whole dataset has evicted it. It attacks capacity misses without changing the mathematical
+result.
+
+### Hardware and software prefetch
+
+Hardware prefetchers excel at sequential and simple-stride streams. Pointer chasing defeats them
+because the next address is unknown until the current load completes. Manual prefetch can help only
+when software knows the future address far enough ahead and useful work overlaps the fetch:
+
+- too near: data still arrives late;
+- too far: the line may be evicted before use;
+- wrong path: wastes bandwidth and cache capacity;
+- a dataset already handled by hardware prefetch: adds instructions without benefit.
+
+Prefetch changes *when* a miss is paid, not whether memory bandwidth and cache capacity exist.
+
+### Instruction cache matters too
+
+Inlining, template specialization, and loop unrolling can remove calls and branches, but excessive
+code growth evicts the hot instruction footprint from L1i. Optimize data and instruction working
+sets together; “more inlining” and “more unrolling” are not monotonic wins.
+
+### Measure the mechanism
+
+Wall-clock time says a change helped; hardware performance counters help explain why. Useful events
+include cycles, instructions, IPC, cache/TLB misses, branch misses, and stalled cycles. Benchmark with
+the real data distribution, pinning/warm-up policy documented, and report tail percentiles—not a
+single best run. Counter names and exact cache sizes/latencies are CPU-specific.
+
+---
+
 ## Common pitfalls / misconceptions
 
 - **"Bigger cache is always better."** No — bigger = slower. L1 is deliberately tiny to hit 4
@@ -287,6 +354,10 @@ Mnemonic: **compulsory** = first touch, **capacity** = too much data, **conflict
   the same data volume; associativity changes *conflict* behavior, not capacity.
 - **Ignoring L1i.** Bloated code (huge inlined templates, fat exception tables) causes *instruction*
   cache misses that are just as deadly as data misses on the hot path.
+- **"Packed means faster."** Smaller can improve capacity, but misaligned/split accesses can cost
+  more or be invalid; packed input should usually be decoded into aligned hot data.
+- **"Manual prefetch always helps."** It consumes issue slots, bandwidth, and cache capacity. It
+  helps only when its distance and access predictability hide a measured miss.
 
 ---
 
@@ -357,6 +428,15 @@ each load stalls the whole pipeline. Fix: restructure for locality (so loads hit
 ahead, or overlap independent loads (memory-level parallelism) so the ~200 ns latencies pipeline
 instead of serializing.
 
+**Q11.** When does SoA beat AoS, and when can AoS still win?
+**Answer:** SoA wins when a loop streams one/few fields across many records: denser useful bytes per
+line and easy SIMD. AoS wins when each operation consumes most fields of one record, because one line
+brings the complete object. Choose from the access pattern.
+
+**Q12.** Why can aggressive inlining make a hot path slower?
+**Answer:** It can expand the instruction working set beyond L1i, raising front-end misses and decode
+pressure. A removed call is not useful if the resulting code footprint no longer stays hot.
+
 ---
 
 ## Indian HFT interview questions
@@ -424,6 +504,10 @@ with the right memory order (release/acquire) to force the necessary drains/fenc
 - **L1** is tiny, per-core, split, ~4 cyc (latency-optimized); **L2** per-core unified; **L3** big,
   shared, the coherency point.
 - Misses are **compulsory / capacity / conflict** — know which each optimization targets.
+- Optimize the **working set**: compact/reorder hot records, split cold fields, choose AoS/SoA from
+  access patterns, and tile repeated large-data work.
+- Hardware prefetch loves regular streams; manual prefetch and packing are measured, architecture-
+  dependent tools, not automatic improvements.
 - Write-back + store buffers hide write latency but create the reordering that concurrency
   primitives must tame.
 

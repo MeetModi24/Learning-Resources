@@ -12,8 +12,8 @@ mechanism is explained (why it exists, how it works in memory/hardware, what it 
 diagrams of what's happening at the hardware/kernel level, tough quizzes with answers, and the exact
 India-desk interview questions that map to it.
 
-> **Relationship to the other guides.** The [`../guide`](../cpp-guide/) C++ guide's Module 15
-> (cache/memory) and Module 16 (atomics/lock-free) touch this material from the *language* side;
+> **Relationship to the other guides.** The [`../guide`](../cpp-guide/) C++ guide's Module 16
+> (cache/memory) and Module 18 (atomics/lock-free) touch this material from the *language* side;
 > [`../guide-os-net`](../../guide-os-net/) covers the HFT-*tuning* angle (isolcpus, NUMA, kernel bypass,
 > networking). This guide is the **foundational systems layer** they both stand on — read it first if
 > the hardware/kernel mechanisms feel like magic.
@@ -28,7 +28,8 @@ India-desk interview questions that map to it.
 - **The through-line:** *A program is bytes in memory that the CPU fetches, decodes, and executes
   through a pipeline, hitting caches and the TLB on the way; the OS, running in a privileged mode,
   multiplexes that CPU and that memory across processes using interrupts, system calls, and context
-  switches.* Every module is one piece of that sentence.
+  switches; those isolated processes communicate through kernel transports or shared memory.* Every
+  module is one piece of that sentence.
 
 ## Table of contents
 
@@ -37,10 +38,10 @@ India-desk interview questions that map to it.
 | # | File | Topics |
 |---|------|--------|
 | 01 | [ca-foundations-isa.md](01-ca-foundations-isa.md) | von Neumann model, ISA, registers, the fetch-decode-execute cycle, **CISC vs RISC**, CPI, why RISC keeps up despite larger code |
-| 02 | [pipelining.md](02-pipelining.md) | The classic 5-stage pipeline, throughput vs latency, **hazards** (structural/data/control), forwarding, stalls, superscalar & out-of-order execution, CPI math |
-| 03 | [branch-prediction.md](03-branch-prediction.md) | Why branches stall the pipeline, static vs **dynamic prediction**, 2-bit counters, BTB, global/local history, the **branch-miss penalty**, branch-miss vs cache-miss, branchless code |
-| 04 | [caches-memory-hierarchy.md](04-caches-memory-hierarchy.md) | SRAM/DRAM, the memory wall, **L1/L2/L3** (and how they differ), cache lines, associativity, replacement, write-back vs write-through, the 3 C's of misses |
-| 05 | [cache-addressing-coherency.md](05-cache-addressing-coherency.md) | VIVT / **VIPT / PIPT** caches, aliasing & homonyms, why VIPT is the sweet spot, **MESI coherency**, and **do we flush caches on a context switch?** |
+| 02 | [pipelining.md](02-pipelining.md) | The classic pipeline, hazards, forwarding, **out-of-order execution** (renaming, reservation stations, ROB/retirement, load-store queues), precise exceptions, **SIMD/vectorization** and CPI math |
+| 03 | [branch-prediction.md](03-branch-prediction.md) | Static/dynamic prediction, 2-bit counters, BTB, global/local history, the **branch-miss penalty**, branchless code and SIMD predication |
+| 04 | [caches-memory-hierarchy.md](04-caches-memory-hierarchy.md) | SRAM/DRAM, **L1/L2/L3**, lines, associativity, write policies, the 3 C's, working sets, struct layout, AoS/SoA, blocking and prefetch |
+| 05 | [cache-addressing-coherency.md](05-cache-addressing-coherency.md) | VIVT/**VIPT**/PIPT, aliasing, **MESI**, false sharing, context-switch behavior, **NUMA**, first touch and locality |
 | 06 | [virtual-memory.md](06-virtual-memory.md) | The **full software→hardware read/write flow** (MMU, TLB, page-table walk, cache, DRAM), multi-level page tables, page faults, demand paging, **copy-on-write** |
 
 ### Part II — Operating Systems (how the OS manages the machine)
@@ -55,6 +56,7 @@ India-desk interview questions that map to it.
 | 12 | [allocators-and-io.md](12-allocators-and-io.md) | **`malloc`/`new`/`free` internals** (`brk`/`mmap`, free lists, bins, arenas, tcmalloc/jemalloc), the OS **I/O path** (VFS → page cache → DMA), and **raw sockets** |
 | 13 | [scheduling-and-realtime.md](13-scheduling-and-realtime.md) | Scheduler vs dispatcher, **CFS/vruntime**, scheduling classes (**SCHED_FIFO/RR/DEADLINE**), nice/priority, **Rate Monotonic & EDF**, CPU affinity & cache locality, load balancing and the **HFT core-isolation stack** |
 | 14 | [deadlocks-starvation-livelock.md](14-deadlocks-starvation-livelock.md) | The **four Coffman conditions**, resource-allocation graphs, **Banker's algorithm**, prevention/recovery, **starvation & aging**, **priority inversion** (inheritance/ceiling), **livelock** & exponential backoff |
+| 15 | [ipc-fundamentals.md](15-ipc-fundamentals.md) | IPC models and trade-offs: **pipes/FIFOs**, message queues, Unix/TCP/UDP sockets, **shared memory**, mapped files, zero-copy ownership, and a bounded shared **SPSC ring** |
 
 ## Notation & conventions
 

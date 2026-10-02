@@ -181,6 +181,61 @@ in the C++ guide.
 
 ---
 
+## 5. NUMA: coherency across memory-locality domains
+
+On a multi-socket server, memory is physically attached to particular sockets/memory controllers.
+The OS still presents one address space, but access time is **non-uniform**:
+
+```text
+NUMA node 0                           NUMA node 1
+┌───────────────┐                     ┌───────────────┐
+│ cores + LLC   │                     │ cores + LLC   │
+│ local DRAM 0  │◀── interconnect ──▶│ local DRAM 1  │
+└───────────────┘                     └───────────────┘
+
+core 0 -> DRAM 0: local path
+core 0 -> DRAM 1: remote path + interconnect traffic
+```
+
+A remote access pays extra hops and shares interconnect bandwidth with remote cache/coherency and
+device traffic. Exact ratios depend on the machine; benchmark the deployed topology rather than
+memorizing one latency number.
+
+### First touch and affinity are one decision
+
+Linux commonly places an anonymous physical page on the NUMA node of the CPU that first faults/writes
+it (**first-touch placement**). This creates a classic mistake:
+
+1. the startup thread on node 0 initializes every buffer;
+2. workers are later pinned across nodes;
+3. node-1 workers repeatedly access remote node-0 memory.
+
+Initialize each partition on the worker/node that will use it, or deliberately bind/allocate it with
+NUMA-aware policy. CPU affinity without matching memory placement can make locality worse, not better.
+
+### Partition ownership before shared access
+
+The scalable design is usually to shard data and work per node:
+
+- node-local workers own node-local partitions and pools;
+- messages cross nodes in batches through an explicit queue;
+- read-mostly configuration may be replicated;
+- frequently written cache lines are not shared across sockets;
+- NIC/PCIe placement is considered, because a device is attached nearer to one NUMA node.
+
+This is the same principle as avoiding false sharing, one level higher: keep ownership and mutation
+local; cross the interconnect deliberately. Cross-socket atomic ping-pong is especially expensive
+because every ownership transfer combines coherency with the remote interconnect.
+
+### When NUMA knowledge matters
+
+It matters most on multi-socket, memory-bandwidth-heavy, or tightly latency-bound deployments. It may
+not justify special code on a single-socket system or for a small cache-resident working set. Inspect
+topology (`lscpu`, `numactl --hardware`), measure local/remote accesses and interconnect traffic, and
+keep correctness independent of placement policy.
+
+---
+
 ## Common pitfalls / misconceptions
 
 - **"Context switches flush the caches."** They don't flush *data caches* (physically tagged). They
@@ -196,6 +251,10 @@ in the C++ guide.
   correct, just slow.
 - **Confusing the TLB with the cache.** The TLB caches *address translations* (VA→PA); the data
   cache caches *data*. Different structures, different flush rules.
+- **"Pinning a thread makes its memory local."** Not retroactively. Existing pages remain where
+  placement policy/first touch put them; affinity and allocation/initialization must agree.
+- **"NUMA is only a DRAM issue."** Remote LLC slices, coherency ownership transfers, and PCIe/NIC
+  placement can all consume the socket interconnect.
 
 ---
 
@@ -260,6 +319,17 @@ invalidate of the others). More cores = more contention on that one line = more 
 which serializes and adds latency. This is *true* sharing contention (the false-sharing mechanism,
 but on genuinely shared data) — fixed by per-core counters summed at the end, or sharded atomics.
 
+**Q11.** A thread is pinned to node 1 but its 4 GB buffer was initialized by the main thread on node
+0. What is the likely problem and fix?
+**Answer:** First-touch placed the physical pages on node 0, so the pinned node-1 thread makes remote
+accesses. Parallel-initialize/touch each partition on its owning node, or apply an explicit placement
+policy, then verify with NUMA counters.
+
+**Q12.** Why is one cross-socket shared atomic often worse than two local counters plus aggregation?
+**Answer:** The shared line repeatedly transfers exclusive ownership over the interconnect, serializing
+writes and generating coherency traffic. Local counters stay in local caches; infrequent aggregation
+amortizes communication.
+
 ---
 
 ## Indian HFT interview questions
@@ -311,6 +381,12 @@ to index virtually without aliasing, index+offset must stay within the 12-bit pa
 the only way to add capacity while keeping the index small is to add *ways*. So 8-way, 32 KB. Direct-
 mapped would also suffer heavy conflict misses.
 
+**Q: What is NUMA and how would you design for it?**
+**A:** "Memory latency/bandwidth depends on which socket owns the physical page. I co-locate thread,
+data, and ideally the relevant NIC; first-touch partitions on their owning workers; shard mutable
+state per node; and batch explicit cross-node communication. I verify topology and counters because
+the benefit is machine- and workload-specific."
+
 ---
 
 ## Key takeaways
@@ -326,6 +402,8 @@ mapped would also suffer heavy conflict misses.
   broadcast (RFO).
 - Coherency is **line-granular**, which creates **false sharing** — a performance bug fixed by
   padding hot data to separate lines.
+- **NUMA** adds socket-local versus remote memory/LLC/device paths. First-touch placement, CPU
+  affinity, data partitioning, and device locality must be designed together.
 - Coherency ≠ synchronization: you still need atomics/fences for RMW and ordering.
 
 **Next:** [06 — Virtual memory](06-virtual-memory.md) — the MMU, TLB, and page tables that produce the
