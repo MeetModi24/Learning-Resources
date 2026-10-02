@@ -155,6 +155,54 @@ offload any logging to a separate thread/core.
 
 ---
 
+## 6. What a syscall actually costs — the numbers
+
+"Hundreds of ns" is the headline, but interviewers want you to know the *spread* across different
+calls, because the fixed boundary cost and the kernel's own work are two separate things. Rough
+orders of magnitude at ~3 GHz (1 cycle ≈ 0.3 ns) — treat as ballpark, not benchmarks; KPTI, CPU, and
+cache state move them a lot:
+
+| Call | Rough cost | Where the cost goes |
+|------|-----------|---------------------|
+| `getpid`-class null syscall | ~100–300 cyc (~50–100 ns) | **pure boundary**: `syscall`/`sysret`, `swapgs`, stack switch, register save/restore. Nearly all overhead, almost no work. |
+| `clock_gettime` / `gettimeofday` via **vDSO** | ~3–10 ns, **no trap** | user-mode read of a kernel-updated page — not a real syscall mechanically. The contrast that proves the boundary, not the work, dominates a cheap call. |
+| `clock_gettime` forced to trap (non-vDSO clock) | ~100–300+ cyc | the same logical call paying the full boundary — shows the trap *is* the cost. |
+| small `read`/`write` (bytes, cache-hot) | ~1k–3k+ cyc (~0.3–1 µs) | boundary **plus** VFS traversal + `copy_to/from_user` data copy + page-cache lookup (Module 12). |
+| `mmap`/`munmap` | several thousand cyc | VMA (virtual-memory-area) edits, page-table setup/teardown; first *touch* of the mapping then page-faults separately (Module 06). |
+| `fork` | tens of thousands+ cyc | COW page-table copy, `task_struct` + kernel stack allocation (Module 10) — scales with the parent's page-table size. |
+
+The spread tells the story: a null syscall is almost **all** boundary and almost **no** work, while
+`read`/`fork` add real kernel work on top. The vDSO row is the punchline — strip the trap and the
+"syscall" collapses to a few ns.
+
+### Components of the boundary cost
+
+When you do pay the trap, this is where the cycles go — in rough order of magnitude:
+
+```
+  (1) mode switch        CPL 3→0, swapgs, kernel stack switch        tens of cyc
+  (2) register save/     entry stub pushes GP regs; sysret restores  tens of cyc
+      restore
+  (3) KPTI page-table    post-Meltdown: switch to the kernel page    tens–hundreds of cyc
+      switch             table on entry (and back on exit) → TLB     (the big post-2018
+                         entries flushed                             regression)
+  (4) pipeline / predictor the transition serialises; the branch     variable
+      disruption         predictor and front-end lose your context
+  (5) cache + TLB        kernel code/data evict YOUR hot L1/L2 lines  OFTEN THE LARGEST,
+      pollution          and TLB entries; you run cold on return      and paid AFTER return
+  (6) the actual kernel  the handler's own work (0 for getpid,        0 → unbounded
+      work               a copy for read, a lot for fork)
+```
+
+Items (1)–(3) are the *direct* cost you'd measure between `syscall` and `sysret`. Item (5) is the
+*indirect* cost — invisible in a microbenchmark of the call itself because it's smeared across the
+instructions *after* you return, yet it's frequently bigger than everything else combined. This is
+exactly why batching matters: one `writev` of 1000 records pays (1)–(5) **once**; 1000 separate
+`write`s pay it a thousand times (Q7 below). It's also why the HFT answer is structural — vDSO/TSC for
+time, kernel-bypass for packets, pre-allocation for memory — rather than "make the syscall faster."
+
+---
+
 ## Common pitfalls / misconceptions
 
 - **"A libc call is a syscall."** Not necessarily. `memcpy`, `strlen`, arithmetic — pure user space.
@@ -218,6 +266,20 @@ fault?
 vector 14) — all go through the IDT. **`syscall` does not** — it uses `LSTAR`/`STAR` MSRs. This
 IDT-vs-MSR split is the crisp answer to "difference between syscall and interrupt implementation."
 
+**Q9.** A null `getpid` syscall costs ~100–300 cycles, but a small `read` costs ~1–3k. The boundary
+crossing is identical — where does `read`'s extra cost come from?
+**Answer:** The *kernel work* on top of the boundary: VFS resolves the fd to a file/inode, the
+page-cache lookup, and the `copy_to_user` data copy. `getpid` does essentially nothing in the kernel,
+so it exposes the pure boundary cost; `read` adds real work. Both still pay the same mode-switch + KPTI
++ cache/TLB pollution underneath.
+
+**Q10.** You microbenchmark a syscall in a tight loop and measure 120 ns. In production the same call
+seems to "cost" much more. What's the benchmark hiding?
+**Answer:** **Cache/TLB pollution** — the indirect cost paid *after* return. In a tight loop the kernel's
+working set stays warm and your own working set is tiny, so the pollution is minimal. In production the
+kernel evicts your real hot code/data and (under KPTI) flushes TLB entries, so your post-return code runs
+cold for thousands of cycles. The microbenchmark measures (1)–(3); production also pays (5).
+
 ---
 
 ## Indian HFT interview questions
@@ -278,6 +340,16 @@ be unmapped (to crash the kernel), or race with another thread unmapping it. `co
 verify the address is in the user range and use fault-tolerant accessors that turn a bad access into
 `-EFAULT` instead of a kernel oops. It's the enforcement of the trust boundary a syscall represents.
 
+**Q8 (Quadeye — numbers).** *Put rough numbers on syscall cost. How much is a null syscall, a `read`,
+a `fork`, and a vDSO `clock_gettime`?*
+**Model answer:** Orders of magnitude at ~3 GHz: a null syscall (`getpid`) ~100–300 cycles (~50–100 ns)
+— almost entirely boundary cost (mode switch, register save/restore, KPTI page-table switch). A small
+`read` ~1–3k cycles, adding VFS + `copy_to_user` on top. `fork` tens of thousands, dominated by the COW
+page-table copy. And `clock_gettime` via the **vDSO** ~3–10 ns with **no trap at all** — a user-mode
+read of a kernel-updated page. The spread shows a cheap syscall is almost all boundary, not work; and
+the biggest cost — cache/TLB pollution — is paid *after* you return, which no in-loop microbenchmark
+catches. That's why we batch unavoidable syscalls and keep them off the hot path entirely.
+
 ---
 
 ## Key takeaways
@@ -291,6 +363,9 @@ verify the address is in the user range and use fault-tolerant accessors that tu
   use the IDT — the crisp "syscall vs interrupt implementation" distinction.
 - Syscalls cost **hundreds of ns and are jittery**, dominated by the mode switch plus cache/TLB
   pollution (worse under KPTI) — not by the handler's work.
+- **Ballpark:** null syscall ~100–300 cyc (pure boundary), small `read` ~1–3k cyc (+ VFS + copy),
+  `fork` tens of thousands (COW page-table copy), vDSO `clock_gettime` ~few ns (no trap). The biggest
+  component — **cache/TLB pollution** — is paid *after* return and hides from in-loop microbenchmarks.
 - The **vDSO** serves harmless read-only calls (`clock_gettime`) in user mode with no trap; **kernel
   bypass** removes packet syscalls entirely. Both exist to keep the boundary off the hot path.
 - HFT rule: **no trapping syscalls while trading** — pre-allocate, vDSO/TSC for time, kernel-bypass

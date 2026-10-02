@@ -53,6 +53,8 @@ India-desk interview questions that map to it.
 | 10 | [processes-context-switching.md](10-processes-context-switching.md) | The PCB, process states, `fork`/`exec` (+ COW), the scheduler & dispatcher, and **exactly how a context switch happens** (register save/restore, TLB, cache effects) |
 | 11 | [threads-and-synchronization.md](11-threads-and-synchronization.md) | Threads vs processes, the thread lifecycle (`join`/`detach` and friends), **how a mutex actually works** (spinlock → futex → kernel), condition variables, deadlock, atomics |
 | 12 | [allocators-and-io.md](12-allocators-and-io.md) | **`malloc`/`new`/`free` internals** (`brk`/`mmap`, free lists, bins, arenas, tcmalloc/jemalloc), the OS **I/O path** (VFS → page cache → DMA), and **raw sockets** |
+| 13 | [scheduling-and-realtime.md](13-scheduling-and-realtime.md) | Scheduler vs dispatcher, **CFS/vruntime**, scheduling classes (**SCHED_FIFO/RR/DEADLINE**), nice/priority, **Rate Monotonic & EDF**, CPU affinity & cache locality, load balancing and the **HFT core-isolation stack** |
+| 14 | [deadlocks-starvation-livelock.md](14-deadlocks-starvation-livelock.md) | The **four Coffman conditions**, resource-allocation graphs, **Banker's algorithm**, prevention/recovery, **starvation & aging**, **priority inversion** (inheritance/ceiling), **livelock** & exponential backoff |
 
 ## Notation & conventions
 

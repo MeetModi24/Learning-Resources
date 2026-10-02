@@ -246,12 +246,107 @@ Practical prevention:
 - **Avoid nested locks** entirely where possible.
 
 Beyond deadlock, know **livelock** (threads keep changing state in response to each other but make no
-progress) and **priority inversion** (a low-priority thread holds a lock a high-priority thread needs;
-fixed by priority inheritance — famously the Mars Pathfinder bug).
+progress) and **priority inversion** (a low-priority thread holds a lock a high-priority thread needs,
+and a medium-priority thread then preempts the low one — so the *high*-priority thread is blocked
+indefinitely by an unrelated medium one; fixed by priority inheritance, famously the Mars Pathfinder
+bug). Detection graphs (RAG), the Banker's avoidance algorithm, starvation/aging, and the full
+livelock/backoff treatment live in Module 14 (see Module 14 — Deadlocks, starvation & livelock).
 
 ---
 
-## 10. The HFT stance: avoid the problem
+## 10. Counting semaphores & the resource-pool pattern
+
+§8 named the semaphore in one line; it earns a section because it's the primitive interviewers reach
+for when the question is *"bound the number of concurrent X"* rather than *"protect this one struct."*
+
+A **counting semaphore** is an integer count `N` guarded by two atomic operations:
+
+- **`acquire` / `wait` / `P`** — decrement the count. If it would go below zero, **block** until someone
+  releases.
+- **`release` / `post` / `V`** — increment the count, waking one blocked waiter if any.
+
+```
+ sem = N (permits available)
+   acquire(): if N>0  N--, proceed            │ N==0 → sleep on the semaphore's wait queue
+   release(): N++, wake one waiter             │
+```
+
+A **binary** semaphore (`N=1`) looks mutex-like, but the defining difference is **ownership**: a mutex
+is owned by its locker and only that thread may unlock it; a semaphore has **no owner**, so the `post`
+can legally come from a *different* thread than the `wait`. That is a feature, not a bug — it's exactly
+what makes a semaphore a **signalling/counting** tool (producer posts, consumer waits) rather than a
+pure lock. (Using a semaphore where you meant a mutex loses the ownership invariant — see the §8 pitfall
+and Q7.)
+
+APIs: POSIX `sem_init`/`sem_wait`/`sem_post` (and `sem_trywait`/`sem_timedwait`); C++20
+`std::counting_semaphore<Max>` with `.acquire()` / `.release()` / `.try_acquire_for()`, and
+`std::binary_semaphore` as the `Max==1` alias.
+
+**The canonical HFT-relevant use is bounding a resource pool.** You preallocate `N` of something scarce
+— market-data decoder buffers, order-slots the exchange will accept in flight, DB/gateway connections —
+and gate access with a semaphore initialized to `N`. At most `N` are ever outstanding; the `N+1`-th
+requester blocks (or `try_acquire`s and sheds load). This is **backpressure** made explicit, which HFT
+cares about: it bounds queue depth and therefore worst-case latency instead of letting work pile up.
+
+```cpp
+std::counting_semaphore<MAX_CONN> pool{POOL_SIZE};   // POOL_SIZE preallocated connections
+
+void handle(Request r) {
+    pool.acquire();                 // blocks if all POOL_SIZE are in use
+    Conn* c = checkout();
+    send(c, r);
+    checkin(c);
+    pool.release();                 // may be a different thread than the acquirer
+}
+```
+
+Semaphores also build the classic **bounded-buffer producer/consumer**: two counting semaphores track
+`empty` and `full` slots, plus a mutex guards the buffer's indices.
+
+```
+ sem empty = CAP;  sem full = 0;  mutex m;
+ producer: empty.acquire(); lock(m); push(item); unlock(m); full.release();
+ consumer: full.acquire();  lock(m); pop();       unlock(m); empty.release();
+```
+
+This is correct and portable, but note the hot-path alternative: a **lock-free SPSC ring** (§10's
+message-passing stance, [`../cpp-guide/16`](../cpp-guide/16-atomics-lockfree.md)) does the same
+bounded hand-off with no mutex and no kernel wait — which is why the semaphore version lives in the
+control plane (backtest feeders, connection pools) and the ring lives on the tick-to-trade path.
+
+---
+
+## 11. Choosing a primitive — the decision table
+
+Interviewers like to hear a crisp selection rule rather than "it depends." Memorize the mapping from
+*situation* to *primitive*, with its cost and whether a waiter blocks:
+
+| Primitive | Use when | Cost (uncontended → contended) | Waiter blocks? |
+|---|---|---|---|
+| **Atomics / lock-free** | single word (flag, counter, pointer swap); the hot path | ~1 atomic op, tens of ns; no kernel ever | No — never blocks |
+| **Spinlock** | critical section *very* short (<~1 µs) **and** a spare/dedicated core | a few ns busy-waiting; burns CPU, no syscall | No — busy-waits |
+| **Mutex (futex)** | general mutual exclusion; section may be longer or contended | tens of ns user-space CAS → ~µs `futex` sleep/wake | Yes — sleeps on contention |
+| **Counting semaphore** | bound N concurrent users; cross-thread signalling (post ≠ waiter) | like a futex; blocks at count 0 | Yes |
+| **Condition variable** | wait for a *predicate/state change*, woken by another thread | mutex + `futex` sleep/wake | Yes |
+| **Reader-writer lock** (`shared_mutex`) | read-mostly, write-rare shared data | shared readers concurrent; writer exclusive | Yes |
+
+The one heuristic that drives most of the table — **compare the expected wait to the cost of a context
+switch (~1–5 µs)**:
+
+- Wait **shorter** than a context switch *and* you can spare the core → **spin** (busy-wait). You'd
+  otherwise pay more to sleep-and-wake than you'd pay to just spin through it.
+- Wait **longer**, or the thread might **sleep/block** on something, or you're on a single/oversubscribed
+  core → **block** (futex-backed mutex/semaphore/condvar), so the CPU goes to someone who can use it.
+
+The HFT corollary: the hot path uses **atomics / lock-free** or, at most, a **spinlock on an isolated
+core** where it never contends and is never descheduled (Module 13 — scheduling & isolation). A
+**blocking mutex is never acceptable on the tick-to-trade path** — a single `futex` sleep is a
+microsecond-plus stall with cold caches on return, which is an eternity at tick-to-trade speed. Blocking
+primitives are confined to the control plane.
+
+---
+
+## 12. The HFT stance: avoid the problem
 
 Every primitive above has a cost, and the fastest synchronization is **none**. HFT designs therefore
 lean on:
@@ -378,6 +473,31 @@ switches for no benefit on the hot path.
 
 ---
 
+**Q10.** You must cap the number of orders your gateway has in flight to the exchange at 32. Which
+primitive, and what does the 33rd request do?
+
+**Answer:** A **counting semaphore** initialized to 32. Each send does `acquire()` (decrement); each
+ack/completion does `release()` (increment). The 33rd concurrent request finds the count at 0 and
+**blocks** until an outstanding order completes — or, better for HFT, uses `try_acquire()` and
+**sheds/queues** the order rather than stalling the hot thread. This is explicit backpressure: at most
+32 outstanding bounds the worst-case queue depth and latency. A mutex can't express "N at once"; it only
+gives you N=1.
+
+---
+
+**Q11.** Your critical section is `price = book.best_bid()` — three loads and a compare, ~20 ns, on a
+dedicated isolated core that nothing else is scheduled on. Spinlock or blocking mutex? What if the same
+code ran on a shared, oversubscribed core?
+
+**Answer:** On the **isolated** core: a **spinlock** (or, better, make it lock-free entirely). The
+section is far shorter than a context switch (~µs), nothing will deschedule the holder, so spinning
+costs a few ns and never enters the kernel — sleeping would cost 100× more. On a **shared/oversubscribed**
+core: **block** (mutex). There, a spinner can be holding the core while the lock *holder* is descheduled,
+so you burn a whole slice spinning on a lock that can't be released — the single-core failure mode from
+Q3.
+
+---
+
 ## Indian HFT interview questions
 
 **"What actually happens when you lock a `std::mutex`? Is it a syscall?"**
@@ -413,6 +533,22 @@ By eliminating shared mutable state on the hot path: a **single-threaded** match
 threads communicate via **lock-free SPSC queues**, and shared reads use immutable snapshots or a lone
 atomic flag. Locks live only in the control plane. The fastest synchronization is not needing any.
 
+**(Optiver / Quadeye) "Mutex vs semaphore — when would you reach for a semaphore?"**
+A mutex is **ownership-based mutual exclusion**: one holder, and only that holder unlocks — use it to
+protect a critical section. A **semaphore is a count with no owner**, so any thread can `post`; reach
+for it when you're (a) **bounding N concurrent users** of a resource pool (connections, buffers,
+in-flight orders) or (b) **signalling across threads** (producer `post`s a "slot ready", consumer
+`wait`s). If the answer is "protect this one struct," it's a mutex; if it's "allow at most N" or "wake
+the other thread," it's a semaphore.
+
+**(Jump / Graviton) "Walk me through picking a synchronization primitive, with the cost of each."**
+Lead with the context-switch heuristic: if the wait is shorter than a context switch (~1–5 µs) and a
+core is free, **spin**; otherwise **block**. Then: a single word → **atomics/lock-free** (tens of ns, no
+kernel); very short section on a spare core → **spinlock**; general exclusion → **mutex/futex** (user-
+space CAS uncontended, `futex` only on contention); bound N or signal → **counting semaphore**; wait for
+a state change → **condition variable** (with predicate); read-mostly data → **`shared_mutex`**. On the
+tick-to-trade path only the first two are acceptable; blocking primitives stay in the control plane.
+
 **"Threads vs processes — and why is a thread switch cheaper?"**
 Threads share the address space (heap/globals/fds), own only stack/registers/TLS; a process is the
 isolated container. A thread switch keeps the same page table, so **no CR3 reload and no TLB flush**
@@ -433,7 +569,13 @@ isolated container. A thread switch keeps the same page table, so **no CR3 reloa
 - **Condition variables** need a mutex and a **predicate** to avoid lost/spurious wakeups; `wait`
   atomically releases-and-sleeps, then re-acquires.
 - **Deadlock** needs all four Coffman conditions; break one — usually via **global lock ordering** or
-  `std::scoped_lock`.
+  `std::scoped_lock`. Detection/avoidance/starvation detail is in Module 14.
+- A **counting semaphore** is an owner-less count: `acquire` decrements/blocks-at-0, `release`
+  increments. Use it to **bound a resource pool** (backpressure) or **signal across threads** — things a
+  mutex (N=1, ownership) can't express.
+- **Pick the primitive by the context-switch heuristic:** wait < a context switch and a core is free →
+  **spin**; else **block**. Hot path = atomics/lock-free or a spinlock on an isolated core; a blocking
+  mutex never belongs on the tick-to-trade path.
 - HFT's real answer is to **avoid shared mutable state**: single-threaded hot path, lock-free SPSC
   queues, immutability/`thread_local`, atomics for the rare flag. Locks stay in the control plane.
 

@@ -135,6 +135,50 @@ child stays a **zombie** (dead but its PCB lingers to hold the exit code). If th
 the child is **orphaned** and re-parented to `init`/`systemd` (PID 1), which reaps it. Zombie leaks
 (a parent that never `wait`s) are a real bug: PCBs and PIDs are finite.
 
+### Reaping precisely: `waitpid`, status macros, and the double-fork
+
+`wait(&status)` blocks until *any* child dies and returns its PID. `waitpid(pid, &status, flags)` is the
+targeted, controllable version:
+
+- `waitpid(pid, …)` reaps a **specific** child (or `-1` for any).
+- `WNOHANG` makes it **non-blocking** — it returns `0` immediately if no child has exited yet, so a
+  long-lived server can poll-reap in its event loop (or from a `SIGCHLD` handler) instead of blocking.
+- `WUNTRACED`/`WCONTINUED` also report children that *stopped* (`SIGSTOP`) or *resumed*, not just ones
+  that died.
+
+The `status` out-param is a packed `int`; you decode it with macros, never by reading it raw:
+
+```c
+int status;
+pid_t p = waitpid(child, &status, WNOHANG);   // 0 = not dead yet; >0 = reaped p
+if (p > 0) {
+    if (WIFEXITED(status))        // child called exit()/returned from main
+        int code = WEXITSTATUS(status);   // its exit code (low 8 bits)
+    else if (WIFSIGNALED(status)) // child was killed by a signal
+        int sig  = WTERMSIG(status);      // which signal (e.g. SIGSEGV, SIGKILL)
+}
+```
+
+`WIFEXITED` vs `WIFSIGNALED` is the key split: did the child exit on its own (read `WEXITSTATUS`) or was
+it killed (read `WTERMSIG`)? Confusing the exit *code* with the killing *signal* is a classic bug.
+
+**The double-fork idiom** sidesteps reaping entirely for fire-and-forget children (and is how a daemon
+detaches). The parent forks a child; that child **forks again** and immediately `_exit`s the middle
+process. The grandchild is now orphaned — its parent (the middle process) is already gone — so it's
+**re-parented to PID 1**, which reaps it automatically when it dies. The original parent only has to
+`wait` for the short-lived middle child, and never accumulates zombies from the long-running grandchild:
+
+```
+   parent ──fork──► child ──fork──► grandchild   (does the real work)
+     │                │                 ▲
+     │ waitpid(child) │ _exit()         │ reparented to PID 1 → auto-reaped
+     ▼                ▼                 │
+   returns fast   middle gone ──────────┘
+```
+
+This is the standard way to launch a detached background process without a `SIGCHLD` handler or a
+lingering zombie.
+
 ---
 
 ## 5. Scheduler vs dispatcher
@@ -326,6 +370,17 @@ all) and **suspends the parent** until the child `exec`s or `_exit`s. It was inv
 waste. With COW, `fork`'s advantage shrank, but `vfork`/`posix_spawn` still avoid even the page-table
 duplication and COW fault overhead, which can matter for very large or very frequently spawning
 parents.
+
+---
+
+**Q10.** A child dies. The parent calls `waitpid` and gets a status where `WIFEXITED` is false but
+`WIFSIGNALED` is true and `WTERMSIG` is `9`. What happened, and could the child have cleaned up first?
+
+**Answer:** The child was **killed by `SIGKILL` (signal 9)** — it did not exit on its own, so there's no
+`WEXITSTATUS` to read (that's why `WIFEXITED` is false). It could **not** clean up: `SIGKILL` can't be
+caught, blocked, or handled, so no destructors/`atexit`/flushes ran — the kernel just tore the process
+down. (Contrast `SIGTERM`, which is catchable and lets the child shut down gracefully.) Reading
+`WEXITSTATUS` here would be meaningless; you must branch on `WIFEXITED` vs `WIFSIGNALED` first.
 
 ---
 

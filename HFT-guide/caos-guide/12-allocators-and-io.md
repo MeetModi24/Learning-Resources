@@ -161,6 +161,42 @@ tail latency for free. But even that isn't deterministic enough for the true hot
 pools/arenas ([`../guide-os-net`](../../guide-os-net/06-custom-memory-pools.md)) that never call `malloc`
 at all during trading.
 
+### Beneath `malloc`: the kernel's own allocators
+
+`malloc` gets its big chunks from `brk`/`mmap` — but *the kernel* then has to find real physical page
+frames to back them, and it has its own allocators for that. Two sit under everything above:
+
+- **Buddy allocator** — the kernel's physical-page-frame allocator. It manages free RAM in
+  **power-of-two blocks** (orders: 1, 2, 4, 8, … pages). A request is rounded up to the next order; if
+  no block of that order is free, a larger block is **split in half** (the two halves are "buddies").
+  On free, if a block's buddy is also free they **coalesce** back into the larger block. The power-of-two
+  structure makes finding a buddy pure address arithmetic (flip one bit), and coalescing is what fights
+  **external** fragmentation of physical memory. This is the source `mmap`/`brk` (and the page-fault
+  handler) ultimately pull pages from.
+
+- **Slab / SLUB allocator** — buddy only hands out whole pages, which is wasteful for the kernel's
+  swarm of small, fixed-size objects (`task_struct`s, `inode`s, `dentry`s, network buffers). The slab
+  layer carves buddy pages into **caches of same-size objects**, keeping pre-initialised objects on
+  free lists so allocating one is a cheap list pop with no per-object setup. Segregating by exact object
+  size kills the **internal** fragmentation you'd get rounding small objects up to a page. (SLUB is the
+  modern default implementation; SLAB/SLOB are older variants.)
+
+```
+   user space:   malloc  ──carves from──►  brk / mmap pool
+                                                │  needs physical pages
+   kernel space:                               ▼
+                 slab/SLUB  ──carves fixed-size objects from──►  pages
+                                                                   │
+                 buddy  ──splits/coalesces power-of-two blocks──►  physical RAM
+```
+
+So the fragmentation vocabulary is the same at every layer, just applied to different units:
+**external** = enough total free space but scattered in unusably-small gaps (buddy coalescing and
+`malloc` boundary-tag coalescing both fight this); **internal** = waste *inside* an allocation from
+rounding up (size-class/slab caches minimise it by matching request sizes closely). `malloc`'s bins
+(§2) and the kernel's slab caches are the same idea — segregate by size for a fast, low-fragmentation
+path — one in user space, one in the kernel.
+
 ---
 
 ## 4. `new`, `delete`, and placement new
@@ -384,6 +420,16 @@ eliminating the arena-lock contention and variable bin-search cost of the defaul
 average may barely move, but the *tail* — dominated by lock waits and cold paths — shrinks, which is
 exactly what p99 measures.
 
+**Q11.** `malloc` has its own bins and free lists — so why does the kernel need the buddy and slab
+allocators underneath it at all?
+**Answer:** Different layers, different units. `malloc` sub-divides *virtual* memory it already owns; it
+can't conjure physical frames. When its pool runs dry it calls `brk`/`mmap`, and the kernel must back
+those with real **physical pages** — that's the **buddy** allocator (power-of-two frame blocks,
+split/coalesce). The kernel's own small fixed-size objects (`task_struct`, `inode`) come from the
+**slab/SLUB** layer carved out of buddy pages, so it isn't wasting a whole page each. `malloc`'s bins and
+slab caches are the same size-segregation idea applied in user space vs the kernel; buddy is the physical
+bedrock both ultimately rest on.
+
 ---
 
 ## Indian HFT interview questions
@@ -465,6 +511,10 @@ allocators.
   **coalescing**.
 - Scalable allocators (**tcmalloc/jemalloc**) use **per-thread caches** by size class → lock-free,
   constant-time fast path → smaller tail latency; still not deterministic enough for the true hot path.
+- Beneath `malloc`, the kernel backs `brk`/`mmap` with physical frames via the **buddy** allocator
+  (power-of-two blocks, split/coalesce → fights external fragmentation) and carves its own small objects
+  from **slab/SLUB** caches (fixed-size → fights internal fragmentation) — the same size-segregation idea
+  as `malloc`'s bins, one layer down.
 - `new` = `operator new` (≈ `malloc`) + constructor; `delete` = destructor + `operator delete`;
   **placement new** builds objects in memory you already own — the bridge to pools.
 - `read`/`write` traverse VFS → filesystem → **page cache**; misses use **DMA** + **interrupt** +
@@ -474,7 +524,7 @@ allocators.
   `AF_PACKET`/`SOCK_RAW` = full link-layer frames (all frames in promiscuous mode, à la tcpdump). They
   go *through* the kernel — the opposite of HFT kernel bypass.
 
-**Next:** back to the [index](00-index.md) — you've reached the last module. For the language-side view
+**Next:** [13 — Scheduling & real-time](13-scheduling-and-realtime.md). For the language-side view
 of memory and concurrency, see the C++ guide's [Module 15 (cache/memory)](../cpp-guide/15-memory-cache.md)
 and [Module 16 (atomics/lock-free)](../cpp-guide/16-atomics-lockfree.md); for the HFT-tuning layer (custom
 pools, isolcpus/NUMA, kernel-bypass networking) see [`../guide-os-net`](../../guide-os-net/00-index.md).

@@ -21,6 +21,8 @@ if you're new; jump by topic if you're revising.
 10. [Processes & context switching](10-processes-context-switching.md) — PCB, states, fork/exec/COW, context-switch mechanics
 11. [Threads & synchronization](11-threads-and-synchronization.md) — join/detach, mutex/spinlock/futex, condition vars, deadlock
 12. [Allocators & I/O](12-allocators-and-io.md) — malloc/new/free internals, the I/O path, raw sockets
+13. [Scheduling & real-time](13-scheduling-and-realtime.md) — CFS/vruntime, SCHED_FIFO/RR/DEADLINE, nice/priority, RM/EDF, affinity, CPU isolation
+14. [Deadlocks, starvation & livelock](14-deadlocks-starvation-livelock.md) — Coffman conditions, RAG, Banker's, prevention, priority inversion, livelock/backoff
 
 ## The through-line
 

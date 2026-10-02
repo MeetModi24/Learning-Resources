@@ -228,6 +228,173 @@ runs), not a data-cache flush.
 
 ---
 
+## 9. Page-replacement — which frame to evict
+
+Physical RAM is finite. When every frame is occupied and a new page must come in (a major fault, §6),
+the kernel must **evict a victim** to free a frame. The policy that picks the victim decides how often
+you fault next — a bad choice evicts a page you're about to touch, forcing another expensive disk read.
+
+The algorithms, from naïve to practical:
+
+- **FIFO** — evict the page that's been resident longest, by load order. Trivial (one queue), but
+  ignores *usage*: a hot page loaded early gets evicted while cold recent pages stay. Worse, it suffers
+  **Belady's anomaly** — giving it *more* frames can *increase* faults, which no sane policy should do.
+  Essentially never used alone.
+- **LRU** — evict the **least-recently-used** page, betting the past predicts the future (temporal
+  locality). Near-optimal hit rate, but exact LRU means timestamping or reordering a list on *every
+  memory access* — far too expensive to do in hardware/software on the hot path. Theoretically ideal,
+  practically unaffordable.
+- **Clock / Second-Chance** — the real-world approximation of LRU, and what Linux-family kernels
+  actually use. It exploits the **reference (accessed) bit** the MMU already sets in the PTE for free
+  on each access. Frames sit in a circular list with a "clock hand":
+
+```
+         ┌───────── clock hand sweeps ──────────┐
+         ▼                                       │
+   [P0 r=1] → [P1 r=0] → [P2 r=1] → [P3 r=0] → [P4 r=1] → (wraps to P0)
+         │                                       │
+   On eviction need: hand advances —
+     r == 0 ?  evict THIS page (victim found).
+     r == 1 ?  clear r to 0 (give it a "second chance"), advance hand, keep scanning.
+```
+
+A page referenced since the last sweep (r=1) survives one pass but gets its bit cleared; if it isn't
+touched again before the hand returns, it's evicted. This gives LRU-like behavior — recently used pages
+survive — at O(1) amortized cost and **zero per-access bookkeeping** (the hardware sets the bit). Linux
+refines it into two LRU lists (active/inactive) with the same reference-bit mechanism.
+
+| Policy | Hit rate | Cost per access | Used in practice? |
+|--------|----------|-----------------|-------------------|
+| FIFO | poor (Belady) | O(1), queue only | no |
+| LRU (exact) | near-optimal | high — update on every access | no (too costly) |
+| Clock / Second-Chance | near-LRU | ~zero (HW ref bit) | **yes** (Linux active/inactive) |
+
+HFT relevance is inverted: on a correctly tuned trading box **page replacement should never run at
+all** — the working set is locked (`mlockall`) and swap is off, so there's never a victim to pick. The
+algorithm matters precisely because you want to guarantee it stays idle; any eviction is a latency
+event. Knowing *why* Clock is cheap is also a clean interview demonstration of the reference bit.
+
+---
+
+## 10. Thrashing & the working set
+
+Push overcommit too far — too many active processes, too little RAM — and the system enters
+**thrashing**: it spends more time servicing page faults (reading pages from disk) than running real
+work. It's a collapse, not a slowdown, because of a vicious cycle: not enough frames → high fault rate
+→ processes block on disk I/O → CPU looks idle → scheduler admits/runs *more* processes → even less RAM
+per process → even higher fault rate.
+
+```
+  Healthy:              fault rate ~ few/sec        CPU util ~ 90%+   (working set fits)
+  Thrashing:            fault rate ~ 100s–1000s/sec CPU util collapses to ~single digits
+                        (everyone blocked on disk; the CPU starves while the disk saturates)
+```
+
+The **working-set model** names the fix: a process's working set W(t, Δ) is the set of pages it
+touched in the last Δ of execution. If the sum of all processes' working sets exceeds physical RAM,
+thrashing is guaranteed. So the kernel should admit only as many processes as their working sets fit —
+and if it can't, **suspend** (swap out whole) some processes rather than let everyone thrash.
+
+Prevention: fewer concurrent processes, more RAM, or lock the hot pages resident. This is the exact
+pathology that `mlockall` + swap-off + pre-faulting (§6) exist to make **structurally impossible** on a
+trading box: with the working set pinned in RAM and no swap device, there is no page to evict and no
+disk to fault to, so the thrashing cycle can't even begin. Thrashing is the disease; memory locking is
+the vaccine.
+
+---
+
+## 11. Huge pages & TLB reach
+
+The TLB holds only a few entries (§7) — say **64** per level for a given page size. The memory those
+entries can cover without a miss is the **TLB reach**:
+
+```
+  reach = (TLB entries) × (page size)
+
+  4 KB pages:  64 × 4 KB  = 256 KB   ← tiny; any working set past 256 KB thrashes the TLB
+  2 MB pages:  64 × 2 MB  = 128 MB   ← 512× more memory covered by the same 64 entries
+  1 GB pages:  64 × 1 GB  = 64 GB    ← entire datasets with near-zero TLB misses
+```
+
+Worked example — an **8 GB** working set (a market-data book, a tick database in RAM):
+
+- With **4 KB** pages it spans 8 GB / 4 KB ≈ **2 million** distinct translations. A 64-entry TLB caches
+  0.003% of them, so you miss the TLB almost constantly, and every miss is a 4-level page-table walk
+  (§3) — up to 4 dependent memory accesses on the hot path.
+- With **2 MB** pages the same 8 GB is 8 GB / 2 MB ≈ **4096** translations. Still more than 64, but now
+  table walks are rare *and* each walk is shorter (a 2 MB page skips the last level: PML4→PDPT→PD→**PTE
+  points straight at the 2 MB frame**, a 3-level walk). TLB misses and walk cost both plummet.
+
+That's why huge pages are standard HFT tuning: they shrink both TLB pressure and page-walk depth for
+large resident structures. Setup (2 MB pages):
+
+```sh
+# 1. Reserve huge pages at boot (GRUB), e.g. 1024 × 2 MB = 2 GB:
+GRUB_CMDLINE_LINUX="hugepagesz=2M hugepages=1024"
+
+# 2. (optional) mount hugetlbfs for file-backed huge-page allocations:
+mount -t hugetlbfs nodev /mnt/huge
+```
+
+```c
+/* 3. Allocate anonymous memory backed by huge pages: */
+void *p = mmap(NULL, size,
+               PROT_READ | PROT_WRITE,
+               MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB,
+               -1, 0);
+```
+
+**1 GB pages** exist too (`hugepagesz=1G`), reserved only at boot (they can't be allocated once memory
+is fragmented) — used for very large, static datasets where even 2 MB TLB reach isn't enough. Caveats:
+huge pages are not swappable (fine — you've disabled swap anyway) and waste memory if sparsely used
+(internal fragmentation — a 2 MB page for 4 KB of data wastes 2044 KB). **Transparent huge pages (THP)**
+let the kernel promote pages automatically, but HFT shops often *disable* THP — the background
+`khugepaged` compaction and promotion cause unpredictable latency spikes; explicit `MAP_HUGETLB` gives
+determinism instead.
+
+---
+
+## 12. Address-space layout & protection
+
+A process's virtual space isn't uniform — it's divided into **segments**, each with distinct contents
+and permissions (the full `brk`/`mmap` picture is in Module 12; here's the layout and the *why*):
+
+```
+  high addr ┌──────────────────┐
+            │   stack          │  grows DOWN ↓   (RW, NX)
+            │        ↓         │
+            │        ·         │  ← one shared gap →
+            │        ↑         │
+            │   mmap region    │  (shared libs, big mallocs, file maps)
+            │   heap           │  grows UP ↑     (RW, NX)
+            │   .bss / .data   │  globals        (RW, NX)
+            │   .text (code)   │  machine code   (R-X — readable, executable, NOT writable)
+  low addr  └──────────────────┘
+```
+
+**Why stack and heap grow toward each other** from opposite ends: they share one gap of free address
+space between them. Neither needs a pre-committed fixed size — the stack can grow deep (recursion)
+while the heap stays small, or vice versa, and only their *sum* is bounded by the gap. A fixed split
+would waste space on whichever grew less. Opposite growth = maximally flexible use of one shared pool.
+
+**Per-segment protection** — the PTE permission bits (§3) are set per segment to enforce **W^X**
+("write XOR execute", a page is never both writable and executable):
+
+- `.text` is **R-X**: executable but read-only, so a bug can't overwrite your own code.
+- heap, stack, data are **RW + NX** (no-execute): writable but *not* executable, so an attacker who
+  injects bytes into a buffer can't jump to and run them as code. The **NX bit** (PTE bit 63 on x86-64)
+  is the hardware enforcement; it defeats classic code-injection exploits.
+
+**ASLR (Address Space Layout Randomization)** randomizes the base addresses of segments (stack, heap,
+mmap, and with PIE the code too) each run, so an attacker can't predict where anything lives to build a
+reliable exploit. The HFT footnote: ASLR adds a small amount of **nondeterminism** — addresses differ
+run to run, which complicates reproducing a latency anomaly or a crash against a fixed core dump — so
+some shops disable it on dedicated, isolated trading boxes (`setarch -R`, or
+`kernel.randomize_va_space=0`) to get byte-for-byte reproducible layouts for debugging. It's a security
+trade made only because the box is already physically and network-isolated.
+
+---
+
 ## Common pitfalls / misconceptions
 
 - **"A pointer is a physical memory address."** No — it's a *virtual* address, translated on every
@@ -303,6 +470,50 @@ ones evicted, so resident memory stays bounded. You can address more virtual mem
 the child still sees the original shared frame. `fork()` gives separate address spaces — post-fork
 writes are private to each process (that's the whole point vs. threads, which *do* share memory).
 
+**Q11.** Exact LRU has the best hit rate of any practical replacement policy — so why don't real
+kernels use it, and what do they use instead?
+**Answer:** Exact LRU requires updating ordering **on every single memory access** (timestamp or move
+to list head), which is far too expensive on the hot path. Kernels approximate it with **Clock /
+Second-Chance**, which rides the **reference bit** the MMU sets *for free* on each access: a circular
+scan evicts a page with r=0 and clears r=1 pages (second chance) instead of evicting them. Near-LRU
+behavior at ~zero per-access cost. Linux splits it into active/inactive LRU lists on the same idea.
+
+**Q12.** FIFO replacement can get *worse* when you add RAM. Name the effect and why it disqualifies
+FIFO.
+**Answer:** **Belady's anomaly** — for FIFO, more frames can yield *more* page faults on some
+reference strings, because FIFO ignores usage and evicts purely by load order. A sane policy must have
+the "stack property" (more frames never increases faults), which LRU and Clock satisfy and FIFO does
+not. That's one reason FIFO is never used alone.
+
+**Q13.** A box has a 64-entry dTLB. With 4 KB pages, how much memory can it map without a miss, and how
+does switching an 8 GB working set to 2 MB huge pages change the picture?
+**Answer:** TLB reach = 64 × 4 KB = **256 KB** — an 8 GB working set (≈2 million 4 KB translations)
+thrashes the TLB, missing almost every access and paying a 4-level walk each time. With 2 MB pages the
+8 GB needs only ≈4096 translations, reach jumps to 64 × 2 MB = **128 MB**, and each walk is one level
+shorter (the PTE points straight at the 2 MB frame). TLB misses and walk depth both collapse — the
+reason huge pages are standard HFT tuning for large resident structures.
+
+**Q14.** Why do stack and heap grow toward each other from opposite ends of the address space?
+**Answer:** They share a single gap of free virtual address space between them. Growing from opposite
+ends means neither needs a fixed pre-committed size — only their *sum* is bounded by the gap, so a
+deep-recursion/small-heap process and a small-stack/huge-heap process both use the same layout
+optimally. A fixed partition would waste whichever side grew less.
+
+**Q15.** What is the NX bit and the W^X policy, and what attack class do they defeat?
+**Answer:** **NX (no-execute)** is a PTE permission bit marking a page non-executable. **W^X** sets it
+so no page is simultaneously writable and executable: code (`.text`) is R-X (executable, read-only),
+while heap/stack/data are RW+NX (writable, non-executable). This defeats classic **code injection** —
+an attacker who writes shellcode into a buffer can't execute it, because that page is NX. (It pushed
+attackers toward return-oriented programming instead, countered by ASLR + stack canaries.)
+
+**Q16.** Thrashing: define it, and explain why it's a collapse rather than a gradual slowdown.
+**Answer:** Thrashing is when the system spends more time paging (reading pages from disk) than doing
+useful work, because the combined working sets exceed RAM. It's a *collapse* due to a positive-feedback
+loop: too few frames → high fault rate → processes block on disk → CPU looks idle → scheduler runs more
+processes → even less RAM each → even higher fault rate. CPU utilization crashes toward zero while the
+disk saturates. The fix is admission control via the working-set model (or, in HFT, pinning the working
+set so it can never start).
+
 ---
 
 ## Indian HFT interview questions
@@ -360,6 +571,34 @@ and disambiguated by **PCID/ASID**; kernel *global* pages are preserved. The **d
 flushed** (physically tagged, unambiguous across processes). So the switch's real memory cost is TLB
 churn plus running cold on the new process's working set — not a cache flush.
 
+**Q: What are huge pages and why would a low-latency system use them?** (Optiver, Graviton, NK
+Securities.)
+**A:** Huge pages (2 MB or 1 GB vs the default 4 KB) make each TLB entry cover far more memory —
+**TLB reach** goes from 64 × 4 KB = 256 KB to 64 × 2 MB = 128 MB with the same 64 entries. For a large
+resident structure (an 8 GB tick DB), 4 KB pages mean ~2 million translations and near-constant TLB
+misses, each triggering a multi-level page-table walk; 2 MB pages cut that to ~4096 translations and a
+shorter walk (the PTE points straight at the 2 MB frame). You reserve them at boot
+(`hugepagesz=2M hugepages=N`) and map with `MAP_HUGETLB`. Most shops disable *transparent* huge pages
+(THP) though — `khugepaged`'s background promotion causes latency jitter; explicit `MAP_HUGETLB` is
+deterministic.
+
+**Q: What is thrashing and how do you prevent it on a trading box?** (Millennium, Quadeye.)
+**A:** Thrashing is when combined working sets exceed RAM, so the system spends more time paging from
+disk than computing — and it's a feedback collapse (more faults → processes block → scheduler runs more
+→ worse). General fixes are admission control via the working-set model and more RAM. On a trading box
+you make it *impossible*: `mlockall` pins the working set resident, swap is disabled, and pages are
+pre-faulted at startup — with no swap device and nothing evictable, there's no page to fault on and the
+cycle can't start.
+
+**Q: Walk me through the virtual address-space layout of a process.** (Da Vinci, Jump — conceptual.)
+**A:** Low to high: `.text` (code, R-X), `.data`/`.bss` (globals, RW+NX), heap (grows up, RW+NX), the
+mmap region (shared libs, large allocations, file maps), and the stack at the top (grows down, RW+NX).
+Stack and heap grow toward each other so they share one gap and neither needs a fixed size. Permissions
+enforce **W^X** (code is executable-not-writable, data is writable-not-executable via the NX bit) to
+block code injection, and **ASLR** randomizes segment bases for security — though some HFT boxes
+disable ASLR for reproducible layouts when debugging latency anomalies, since the box is already
+isolated.
+
 ---
 
 ## Key takeaways
@@ -378,6 +617,16 @@ churn plus running cold on the new process's working set — not a cache flush.
   protection fault + refcount), making `fork()` cheap.
 - On a context switch the **TLB** is flushed/ASID-tagged and **CR3** reloaded, but **data caches are
   not flushed**.
+- When RAM is full, the kernel evicts a victim by **page replacement**: FIFO (bad — Belady's anomaly),
+  LRU (ideal but too costly), **Clock/Second-Chance** (the practical choice — approximates LRU via the
+  free MMU reference bit).
+- **Thrashing** is a paging-induced collapse when working sets exceed RAM; the **working-set model**
+  (and, in HFT, `mlockall` + no swap) prevents it.
+- **Huge pages** multiply **TLB reach** (64 × 2 MB = 128 MB vs 64 × 4 KB = 256 KB) and shorten page
+  walks — standard HFT tuning for large resident structures via `MAP_HUGETLB`.
+- The address space is **segmented** (code R-X, data/heap/stack RW+NX); stack and heap grow toward each
+  other to share one gap; **W^X/NX** blocks code injection and **ASLR** randomizes bases (sometimes
+  disabled on trading boxes for reproducibility).
 
 **Next:** [07 — Privilege & the OS role](07-privilege-and-os-role.md) — kernel vs user mode, the mode
 bit that makes all this protection enforceable, and why a user process can't just grant itself
