@@ -1,6 +1,6 @@
-# Module 3 — Dynamic memory (`new`/`delete`) & why the heap is slow
+# Module 4 — Dynamic memory (`new`/`delete`) & why the heap is slow
 
-Stack objects die when their scope ends (Module 1). But order-book orders must *outlive* the
+Stack objects die when their scope ends (Module 2). But order-book orders must *outlive* the
 function that created them — they rest in the book until filled or cancelled. That's what the
 **heap** (free store) is for: memory whose lifetime **you** control. This module covers the raw
 mechanism (`new`/`delete`), the three classic bugs it causes, *why* the heap is slow and — the part
@@ -68,7 +68,7 @@ delete q;          // UB — corrupts the allocator's internal bookkeeping
   leak is fatal over a session.
 - **Use-after-free**: the block was returned to the allocator, which may have handed it to someone
   else. Reading gives stale/foreign data; writing corrupts another object. Like the dangling-stack
-  pointer from Module 1, it often *appears* to work until the slot is reused.
+  pointer from Module 2, it often *appears* to work until the slot is reused.
 - **Double free**: freeing an already-freed block corrupts the allocator's free-list metadata, which
   typically crashes *later*, somewhere unrelated — a nightmare to debug.
 
@@ -100,8 +100,8 @@ auto p = std::make_unique<int>(5); // heap int, owned by p
 // p goes out of scope -> automatically deletes. No leak, no manual delete, no double free.
 ```
 
-This is **RAII** (Module 7): tie the heap object's lifetime to a *stack* object (the `vector`, the
-`unique_ptr`), so the automatic stack cleanup from Module 1 handles the heap cleanup for you. You get
+This is **RAII** (Module 9): tie the heap object's lifetime to a *stack* object (the `vector`, the
+`unique_ptr`), so the automatic stack cleanup from Module 2 handles the heap cleanup for you. You get
 heap flexibility with stack safety — the single most important idiom in modern C++, and the reason a
 well-written modern C++ program can be as memory-safe in practice as a garbage-collected one, without
 the GC pauses (which matters enormously for HFT).
@@ -111,11 +111,11 @@ the GC pauses (which matters enormously for HFT).
 ## 4. "If RAII ties it to a scope, why not just use the stack?"
 
 A fair and common question — and mostly right. RAII ties lifetime to the **owner** object, not
-blindly to the enclosing scope, and the owner can be *moved out* of the scope (Module 9). Prefer the
+blindly to the enclosing scope, and the owner can be *moved out* of the scope (Module 11). Prefer the
 stack by default; reach for the heap only when the stack genuinely **can't** do the job. Four reasons
 it can't:
 
-1. **Too big.** The stack is a fixed 1–8 MB block (Module 1). `int big[10'000'000];` (40 MB)
+1. **Too big.** The stack is a fixed 1–8 MB block (Module 2). `int big[10'000'000];` (40 MB)
    overflows it; `std::vector<int> big(10'000'000);` puts 40 MB on the heap with a tiny handle on
    the stack.
 2. **Size known only at runtime.** Stack frame sizes are fixed at *compile* time. A true
@@ -159,7 +159,7 @@ work is *variable*:
    `sbrk`) — a **system call**, orders of magnitude slower, and the first touch of a fresh page
    triggers a page fault.
 4. **Cache scatter.** Two separate `new`s can land far apart in the address space. Walking objects
-   that are scattered thrashes the CPU cache (a miss ≈ 100 ns vs an L1 hit ≈ 1 ns — Module 15).
+   that are scattered thrashes the CPU cache (a miss ≈ 100 ns vs an L1 hit ≈ 1 ns — Module 16).
 
 Rough intuition: stack ≈ 1 ns; heap `new` ≈ tens to hundreds of ns, and *occasionally* microseconds
 when it hits the OS. That last word — *occasionally* — is the real problem. HFT doesn't primarily
@@ -229,7 +229,7 @@ any synchronization. But the core idea — pre-allocate, then recycle — is the
 - **Mismatched forms**: `delete` on `new[]`, or `delete[]` on `new` — UB.
 - **`delete` on a stack pointer** (`int x; delete &x;`) — UB; you can only `delete` what `new`
   returned.
-- **Deleting through a base pointer without a virtual destructor** (Module 11) — UB / partial
+- **Deleting through a base pointer without a virtual destructor** (Module 8) — UB / partial
   destruction.
 - **Assuming `new` is cheap on the hot path** — the jitter, not the mean, is what bites HFT.
 - **`new`-ing in a tight loop** when a `reserve`d `vector` or a pool would do — needless allocator
@@ -269,7 +269,7 @@ delete b;
 ```
 **Answer:** Double free (UB). `a` and `b` point at the *same* block; deleting both frees it twice,
 corrupting the allocator. Aliasing raw owning pointers is the setup for this bug; `shared_ptr`
-exists to solve it (Module 13).
+exists to solve it (Module 14).
 
 **Q4.** Why does `new int` cost ~50–200 ns while allocating a stack `int` costs ~1 ns? Give the
 mechanism.
@@ -303,7 +303,7 @@ std::cout << " " << *p;
 **Answer:** The first print is defined (`1` — within reserved capacity, no reallocation). The
 `push_back(5)` exceeds capacity, so the vector **reallocates** to a new, larger heap block and frees
 the old one — `p` now dangles. The second `*p` is UB. Iterator/pointer invalidation on reallocation
-is a classic gotcha (Module 12).
+is a classic gotcha (Module 13).
 
 **Q8.** Why store a free-list *inside* the pooled objects (a union with `next`) rather than in a
 separate `vector<Order*>`?
@@ -362,7 +362,7 @@ Orders come from an `OrderPool` sized at startup for the maximum expected number
 book **never calls `new` while trading** — acquiring an order slot is a free-list pop, releasing one
 (on cancel or full fill) is a free-list push, both O(1) and allocation-free. The pool's contiguous
 `storage` block also gives spatial locality: orders that are allocated near each other in time sit
-near each other in memory, so walking a busy price level stays cache-hot (Module 15).
+near each other in memory, so walking a busy price level stays cache-hot (Module 16).
 
 The links between resting orders (the doubly-linked list at each price level) are non-owning raw
 pointers or 32-bit indices *into the pool* — the pool owns the storage; nothing else ever `delete`s
@@ -392,5 +392,5 @@ out by allocating once and recycling. This single decision is a large fraction o
 - `vector` reallocation on `push_back` past capacity invalidates all pointers/iterators — `reserve`
   or pool to avoid the hidden allocation and jitter.
 
-**Next:** [Module 4 — lvalues, rvalues & an intro to moving](04-value-categories.md) — the value
+**Next:** [Module 5 — lvalues, rvalues & an intro to moving](05-value-categories.md) — the value
 categories that make it possible to *steal* resources from temporaries instead of copying them.

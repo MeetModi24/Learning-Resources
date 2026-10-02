@@ -5,7 +5,7 @@ Two questions bottom out here that HFT interviewers love because they force you 
 `read()` / `write()`?" Both are journeys from a one-line C call, through the C library, into the
 kernel, and down to hardware (DRAM, disk, the NIC). This module traces all three: the heap allocator's
 internals, the OS I/O path, and the special case of raw sockets — the layer where market data actually
-enters your process. The [C++ guide's Module 3](../cpp-guide/03-dynamic-memory.md) and
+enters your process. The [C++ guide's Module 4](../cpp-guide/04-dynamic-memory.md) and
 [`../guide-os-net`](../../guide-os-net/06-custom-memory-pools.md) show how HFT *avoids* the slow paths
 below; this module explains the machinery they're avoiding so you can defend *why*.
 
@@ -525,6 +525,6 @@ allocators.
   go *through* the kernel — the opposite of HFT kernel bypass.
 
 **Next:** [13 — Scheduling & real-time](13-scheduling-and-realtime.md). For the language-side view
-of memory and concurrency, see the C++ guide's [Module 15 (cache/memory)](../cpp-guide/15-memory-cache.md)
-and [Module 16 (atomics/lock-free)](../cpp-guide/16-atomics-lockfree.md); for the HFT-tuning layer (custom
+of memory and concurrency, see the C++ guide's [Module 16 (cache/memory)](../cpp-guide/16-memory-cache.md)
+and [Module 18 (atomics/lock-free)](../cpp-guide/18-atomics-lockfree.md); for the HFT-tuning layer (custom
 pools, isolcpus/NUMA, kernel-bypass networking) see [`../guide-os-net`](../../guide-os-net/00-index.md).

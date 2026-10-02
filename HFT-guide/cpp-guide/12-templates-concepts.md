@@ -1,9 +1,9 @@
-# Module 10 — Templates → Concepts
+# Module 12 — Templates → Concepts
 
 Templates are C++'s **compile-time generics**: you write the code once with a placeholder type, and
 the compiler stamps out a fully specialized, concrete version for every type you actually use — with
 **zero runtime overhead**. No boxing, no tagged unions, no virtual dispatch. This is the backbone of
-"zero-cost abstraction" (Module 17) and of the entire STL, and it is *the* mechanism HFT code leans
+"zero-cost abstraction" (Module 19) and of the entire STL, and it is *the* mechanism HFT code leans
 on to get generic, reusable components that still compile down to the same machine code you'd have
 written by hand.
 
@@ -48,7 +48,7 @@ template<T> T max(T,T)     ──►       max<int>(int,int):    cmp / cmov ...
 The consequence you must be able to state in an interview: **the abstraction exists only in the
 source; in the binary there is no generic `max`, only the specialized copies.** That is why there is
 zero runtime cost — and also why templates cause *code bloat* (many copies) and slow compiles
-(Section 8).
+(Section 9).
 
 ---
 
@@ -76,7 +76,7 @@ argument, or use two type parameters `template <typename A, typename B>`, or for
 
 Deduction also **strips** top-level `const` and references unless you ask for them. `template<class T>
 void f(T x)` called with a `const int&` deduces `T = int` (a copy). To preserve them you take
-`const T&` or `T&&` (forwarding reference — Module 9).
+`const T&` or `T&&` (forwarding reference — Module 11).
 
 ---
 
@@ -107,12 +107,12 @@ compile-time constant:
 
 - `data_[N]` is a fixed inline array — it lives *inside* the object (on the stack, or inline in a
   pooled slot), **no heap allocation, no runtime size field.**
-- `N` can be used in `constexpr` arithmetic: masks (`& (N-1)` when `N` is a power of two — Module 18),
+- `N` can be used in `constexpr` arithmetic: masks (`& (N-1)` when `N` is a power of two — Module 20),
   compile-time bounds checks, loop unrolling hints.
 - Two `RingBuffer<Order,1024>` and `RingBuffer<Order,2048>` are **different types** — you cannot
   accidentally mix them. The size is part of the type identity.
 
-This is exactly how fixed-capacity lock-free queues (Module 16) are built: `SpscQueue<Message, 4096>`.
+This is exactly how fixed-capacity lock-free queues (Module 18) are built: `SpscQueue<Message, 4096>`.
 
 ```
 RingBuffer<Order,4> object in memory (no heap, all inline):
@@ -152,11 +152,52 @@ template <typename T> struct Serializer<T*> {      // partial: any pointer type
 
 This is the classic compile-time "select the best algorithm per type" tool — the STL uses it heavily
 (e.g. `std::is_pointer`, iterator-category dispatch). Note: **function templates cannot be partially
-specialized** — you use overloading (or `if constexpr`, Section 7) instead.
+specialized** — you use overloading (or `if constexpr`, Section 8) instead.
 
 ---
 
-## 5. The pre-C++20 pain: duck typing and awful errors
+## 5. Type traits and metafunctions
+
+A **type trait** is a template that answers a compile-time question about a type or produces a
+related type. Modern traits expose either a Boolean `..._v` or a resulting type `..._t`:
+
+```cpp
+#include <type_traits>
+
+static_assert(std::is_integral_v<int>);
+static_assert(std::is_trivially_copyable_v<std::uint64_t>);
+
+using Raw = std::remove_cvref_t<const Order&>;  // Order
+using U   = std::make_unsigned_t<int>;          // unsigned int
+```
+
+The long forms reveal the mechanism:
+
+```cpp
+std::is_integral<int>::value
+typename std::remove_reference<T>::type
+```
+
+A trait is simply a class template whose members encode the answer. You can define domain traits,
+but prefer a concept when the goal is to constrain an interface:
+
+```cpp
+template <class T>
+inline constexpr bool wire_value_v =
+    std::is_trivially_copyable_v<T> && std::has_unique_object_representations_v<T>;
+```
+
+Useful traits to recognize: `is_same`, `is_integral`, `is_enum`, `is_pointer`,
+`is_trivially_copyable`, `is_nothrow_move_constructible`, `remove_cvref`, `decay`, and
+`underlying_type`. They drive serialization checks, overload selection, storage layout, and whether
+containers can safely choose a move path.
+
+Do not confuse **trivially copyable** with “safe to serialize directly.” Padding, endianness,
+versioning, and protocol representation still matter.
+
+---
+
+## 6. The pre-C++20 pain: duck typing and awful errors
 
 Before concepts, templates were **duck-typed at compile time**: a template silently required whatever
 operations its body used (`a < b` requires `operator<`), but that requirement was *implicit*. If you
@@ -178,7 +219,7 @@ integral") was buried in boilerplate. Concepts replace all of this.
 
 ---
 
-## 6. Concepts (C++20) — named, checkable constraints
+## 7. Concepts (C++20) — named, checkable constraints
 
 A **concept** is a named, compile-time predicate on types — a Boolean you evaluate at compile time
 that says "does type `T` support these operations?" It both *documents* and *enforces* what a template
@@ -221,7 +262,7 @@ template <typename T> requires std::integral<T>  T next2(T x);   // trailing req
 
 ---
 
-## 7. `if constexpr` — compile-time branching
+## 8. `if constexpr` — compile-time branching
 
 Templates often need to do *different things* for different types. `if constexpr` chooses the branch
 at **compile time**, and — critically — **the untaken branch is not even compiled** (it only has to
@@ -247,7 +288,7 @@ tag-dispatch and much SFINAE. Zero runtime cost: only one branch survives into t
 
 ---
 
-## 8. Variadic templates & the cost of templates
+## 9. Variadic templates, folds & the cost of templates
 
 **Variadic templates** take any number of arguments of any types — how `std::make_unique`,
 `emplace_back`, and type-safe logging are built:
@@ -261,13 +302,31 @@ log("order ", 42, " @ ", 100.5);                   // one call, mixed types, no 
 ```
 
 The pack `Args...` is expanded at compile time; `emplace_back` uses this + perfect forwarding
-(Module 9) to construct an element in place from arbitrary constructor arguments.
+(Module 11) to construct an element in place from arbitrary constructor arguments.
+
+Two pack patterns are worth recognizing:
+
+```cpp
+template <class... Ts>
+constexpr auto total(Ts... xs) { return (xs + ...); }       // unary fold
+
+template <class F, class... Args>
+decltype(auto) invoke_logged(F&& f, Args&&... args) {
+    log("call");
+    return std::forward<F>(f)(std::forward<Args>(args)...);  // expand + preserve categories
+}
+```
+
+Perfect forwarding belongs in generic wrappers and factories—not ordinary business functions. A
+forwarding-reference overload can accept almost anything, complicate overload resolution, and
+produce long diagnostics; constrain it with a concept and use it only when preserving the caller's
+value category is the actual requirement (Module 11).
 
 **The cost side — you must be able to name these tradeoffs:**
 
 - **Code bloat**: each distinct instantiation is a separate function/class in the binary. Ten types
   through `max<T>` = ten `max` functions. This grows the binary and can pressure the **instruction
-  cache** (Module 15) — relevant in HFT where i-cache misses cost latency.
+  cache** (Module 16) — relevant in HFT where i-cache misses cost latency.
 - **Compile times**: monomorphization is expensive; heavily templated code (Boost, some STL headers)
   compiles slowly.
 - **Two-phase lookup / errors**: historically brutal (fixed by concepts). Names in a template are
@@ -432,5 +491,5 @@ Squarepoint, Jump, HRT, NK Securities.)*
 - The template contract: pay in **build time + binary size**, buy **zero per-call overhead** — the
   correct trade for low-latency code.
 
-**Next:** [11 — Inheritance, virtual functions, vtables](11-inheritance-virtual.md) — the *runtime*
-polymorphism alternative, how the vtable actually lays out in memory, and why the hot path avoids it.
+**Next:** [13 — The STL: containers, iterators, algorithms, complexity & cache](13-stl.md) — the
+standard-library machinery built on templates and the hardware costs behind each container.

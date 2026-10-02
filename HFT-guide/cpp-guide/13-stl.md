@@ -1,4 +1,4 @@
-# Module 12 — The STL: containers, iterators, algorithms, complexity & cache
+# Module 13 — The STL: containers, iterators, algorithms, complexity & cache
 
 The Standard Template Library gives you battle-tested containers and algorithms so you rarely
 hand-roll a data structure. For HFT the key skill is *not* using them — it's knowing each one's
@@ -61,6 +61,88 @@ A few things the table understates:
   Every lookup does a hash, a bucket index, then chases node pointers — two indirections. Custom
   **open-addressing** flat maps (all entries in one contiguous array, probing on collision) are far
   more cache-friendly and are what HFT shops usually build.
+
+### Sequence containers: know the exact trade
+
+**`std::array<T, N>`** is a fixed-size aggregate containing `N` inline `T` objects. It has no
+capacity and never allocates; its iterators are never invalidated during its lifetime. Prefer it for
+compile-time-bounded tables and ring-buffer storage. Unlike a raw C array, it knows its size and
+works cleanly with iterators and algorithms.
+
+**`std::vector<T>`** is normally three machine words—begin pointer, end/size, and capacity end—plus
+one contiguous heap allocation for elements. Distinguish:
+
+- `reserve(n)`: change capacity only; constructs no elements;
+- `resize(n)`: change size; constructs/destroys elements;
+- `shrink_to_fit()`: a non-binding request that may reallocate and invalidate;
+- `at(i)`: checked and throws; `operator[](i)`: unchecked UB when out of range.
+
+Growth is geometric but the factor is implementation-dependent; never rely on “it always doubles.”
+`std::vector<bool>` is a packed-bit specialization: `v[i]` returns a proxy, not `bool&`, so generic
+reference-taking code can surprise you. Use it for deliberate bit compression, not as a drop-in
+normal vector.
+
+**`std::deque<T>`** uses a map of separately allocated fixed-size blocks. It provides O(1) random
+access and O(1) insertion/removal at both ends without shifting the whole sequence. It is not one
+contiguous span, so do not pass `&d[0]` plus `d.size()` as a flat buffer. End insertions generally
+preserve references to existing elements but can invalidate iterators; check the precise operation's
+rule rather than assuming vector behavior.
+
+**`std::list<T>`** and `std::forward_list<T>` offer stable nodes and O(1) relinking *when you already
+have the position*. Their special operation is `splice`, which transfers nodes between lists without
+moving the elements. The costs are allocation, per-node pointers, cache misses, and no random access.
+In low-latency code, an intrusive list over pooled nodes often keeps the relinking property without
+the per-node allocation.
+
+### Ordered associative containers
+
+`std::set`/`std::map` store unique keys; `multiset`/`multimap` allow duplicates. They maintain sorted
+order and provide O(log n) lookup/insertion/erasure, typically through a balanced tree:
+
+```cpp
+std::map<int, Level> levels;
+auto first_not_below = levels.lower_bound(price);  // first key >= price
+auto first_above     = levels.upper_bound(price);  // first key > price
+auto [begin, end]    = levels.equal_range(price);
+```
+
+For read-only lookup, prefer `find`, `contains` (C++20), or `at`. `map[key]` inserts a default value
+when missing. `try_emplace` avoids constructing the mapped value when the key already exists;
+`insert_or_assign` states deliberate replacement.
+
+The comparator defines key equivalence: two keys are equivalent when neither compares less than the
+other. A stateful or inconsistent comparator can silently break the container's invariants.
+
+### Unordered associative containers
+
+`unordered_set`/`unordered_map` trade ordering for average O(1) lookup. Correctness requires:
+
+```text
+if key_equal(a, b) is true, hash(a) MUST equal hash(b)
+```
+
+Inspect and control allocation behavior when latency matters:
+
+```cpp
+std::unordered_map<OrderId, Order*> by_id;
+by_id.max_load_factor(0.70f);
+by_id.reserve(max_live_orders);       // sizes buckets for expected element count
+```
+
+`reserve`/`rehash` can allocate and rebuild buckets. Doing it at startup avoids a surprise latency
+spike during trading. Average O(1) is not a worst-case guarantee; collisions, poor hashes, and
+adversarial input can form long chains.
+
+### Container adapters
+
+Adapters expose a restricted interface over another container:
+
+- `std::stack<T>`: LIFO (`push`, `top`, `pop`), usually over `deque`;
+- `std::queue<T>`: FIFO (`push`, `front`, `pop`), usually over `deque`;
+- `std::priority_queue<T>`: heap-backed best-element access, O(1) `top`, O(log n) push/pop.
+
+`priority_queue` is not a sorted container and offers no efficient arbitrary erase/decrease-key. It
+can rank work items, but it is a poor complete order book when cancellation by ID is required.
 
 ---
 
@@ -142,12 +224,62 @@ auto n  = std::count_if(v.begin(), v.end(), [](int x){ return x > 0; });
 v.erase(std::remove_if(v.begin(), v.end(), pred), v.end()); // erase-remove idiom (see below)
 ```
 
+Organize algorithms by the contract they need:
+
+- **search/query**: `find`, `find_if`, `count_if`, `all_of`, `any_of`;
+- **sorted-range search**: `lower_bound`, `upper_bound`, `binary_search`, `equal_range`;
+- **reordering**: `sort`, `stable_sort`, `nth_element`, `partial_sort`;
+- **heap algorithms**: `make_heap`, `push_heap`, `pop_heap`;
+- **transformation**: `transform`, `copy_if`, `remove_if`, `unique`;
+- **numeric**: `accumulate`, `inner_product`, `reduce`, scans.
+
+The precondition is part of correctness: `lower_bound` requires the range to be partitioned/sorted
+under the same comparison. Breaking that precondition does not turn it into linear search; the
+answer is meaningless.
+
+Two interview-useful choices:
+
+- `nth_element(first, nth, last)` partitions in average O(n): the nth element is exactly what a full
+  sort would place there, without sorting either side. Use it for medians/percentiles.
+- `stable_sort` preserves input order among equivalent keys but may need extra memory; `sort` does
+  not preserve it. Stability matters when an earlier ordering encodes priority.
+
+Binary search has excellent comparison complexity but can still be slower than a short linear scan
+over tiny cache-resident data. Measure with realistic sizes and branch behavior.
+
+When the search range is conceptually unbounded or the likely position is close to the beginning,
+**exponential (galloping) search** first probes indices `1, 2, 4, 8, ...` to bracket the key, then
+binary-searches that bracket. It costs O(log p) comparisons for a result at position `p`. This is a
+useful pattern for monotone sequences, but it is not automatically better than `lower_bound` on a
+normal bounded vector—the extra branches must match the data distribution.
+
+### Allocation-free numeric conversion
+
+For parsing and formatting numbers in a latency-sensitive path, prefer `<charconv>` over streams:
+
+```cpp
+#include <charconv>
+
+char buffer[32];
+auto [end, ec] = std::to_chars(std::begin(buffer), std::end(buffer), order_id);
+if (ec == std::errc{}) {
+    sink.write(buffer, static_cast<std::size_t>(end - buffer));
+}
+
+std::uint64_t parsed{};
+auto [next, parse_ec] = std::from_chars(first, last, parsed);
+```
+
+`to_chars`/`from_chars` are locale-independent, do not allocate, and report failure with
+`std::errc` rather than exceptions. They fit wire parsing and structured logging; still validate
+range, consumed input, and protocol rules at the boundary.
+
 The **erase-remove idiom** deserves a note: `std::remove_if` doesn't shrink the container (an
 algorithm can't — it only has iterators); it *shuffles* the kept elements to the front and returns an
 iterator to the new logical end. `vector::erase` then physically drops the tail. Forgetting the
 `erase` leaves garbage at the end — a classic bug.
 
-C++20 **ranges** remove the `begin()/end()` noise and add lazy, composable **views** (Module 18):
+C++20 **ranges** remove the `begin()/end()` noise and add lazy, composable **views** (Module 20):
 
 ```cpp
 std::ranges::sort(v);                                              // no .begin()/.end()
@@ -173,9 +305,76 @@ std::count_if(orders.begin(), orders.end(), expensive);
   and adds an **indirect call** that defeats inlining. Use lambdas/functors on hot paths; reserve
   `std::function` for when you genuinely need runtime-swappable type erasure (cold paths).
 
+Function pointers hold only compatible free/static functions or non-capturing lambdas. A functor or
+lambda can carry state inline. `std::function<R(Args...)>` gives one runtime-polymorphic wrapper for
+many callable types, but its small-buffer optimization is implementation-dependent—never assume a
+particular capture is allocation-free without measuring the target library.
+
 ---
 
-## 7. `reserve` and small-buffer optimizations — the free wins
+## 7. Vocabulary types: express shape without sentinel values
+
+The standard library contains small types that make interfaces precise:
+
+### `pair`, `tuple`, and structured bindings
+
+```cpp
+auto [it, inserted] = by_id.try_emplace(id, order);
+std::tuple<Price, Quantity, Side> event{px, qty, side};
+```
+
+`pair` is ideal for two conventional results; a named struct is clearer when fields have domain
+meaning. A large anonymous tuple quickly becomes unreadable (`get<2>` says nothing).
+
+### `optional<T>` — a value may be absent
+
+```cpp
+std::optional<Price> best_bid() const;
+
+if (auto px = book.best_bid()) publish(*px);
+```
+
+This is clearer than a magic price such as `-1`. `optional<T>` stores `T` inline plus engaged state;
+it does not normally allocate. Accessing `.value()` when empty throws; unchecked `*opt` requires the
+caller to have proved engagement.
+
+### `variant<Ts...>` — one value from a closed set
+
+```cpp
+using Message = std::variant<NewOrder, Cancel, Replace>;
+
+std::visit([&](const auto& msg) { handle(msg); }, message);
+```
+
+`variant` is a tagged union: storage large enough for its largest alternative plus a discriminator.
+It gives exhaustive, type-safe handling and usually no allocation. It is a strong alternative to a
+virtual hierarchy when the alternatives are known and the hot path benefits from value storage.
+
+### `any` — one copyable value from an open set
+
+`std::any` type-erases an arbitrary copyable value. `any_cast<T>` throws `bad_any_cast` on a wrong
+value extraction (the pointer form returns null). It is useful for dynamic configuration/plugin
+boundaries; it sacrifices compile-time exhaustiveness and may allocate, so prefer `variant` for a
+known performance-sensitive set.
+
+### `string_view` and `span` — non-owning views
+
+`std::string_view` is pointer+length over characters; `std::span<T>` is pointer+count over contiguous
+`T`. Both avoid copies and allocations, and neither extends the underlying lifetime:
+
+```cpp
+std::string_view bad() {
+    std::string s = "temporary";
+    return s;                         // dangling view
+}
+```
+
+Views belong in short-lived parameters and parsing pipelines where ownership is established
+elsewhere. Treat a stored view as a lifetime claim that must be proven.
+
+---
+
+## 8. `reserve` and small-buffer optimizations — the free wins
 
 ```cpp
 std::vector<Trade> trades;
@@ -208,6 +407,13 @@ Related layout tricks the STL uses that you should recognise:
   lifetime → dangling.
 - **Assuming `unordered_map` is always O(1)**: adversarial or clustered keys → O(n) worst case
   (all in one bucket); and rehash invalidates iterators.
+- **Confusing `reserve` and `resize`**: reserve creates capacity, not elements; indexing into reserved
+  but unconstructed space is UB.
+- **Treating `deque` as contiguous**: random access does not imply one flat buffer.
+- **Taking `bool&` from `vector<bool>`**: element access returns a bit proxy, not an actual `bool&`.
+- **Dangling `string_view`/`span`**: a view never owns or extends the source lifetime.
+- **Hash/equality mismatch**: equal keys with different hashes violate unordered-container
+  requirements and make lookup unreliable.
 
 ---
 
@@ -261,6 +467,20 @@ string object. A 100-char string exceeds the inline buffer, so it heap-allocates
 **Q9.** `std::deque` vs `std::vector` for a FIFO where you push at the back and pop at the front?
 **Answer:** `deque` — O(1) at both ends and no shifting. A `vector` pop-front is O(n) (shift
 everything). `deque` gives up a little cache locality (chunked) for cheap front operations.
+
+**Q10.** What is wrong with `v.reserve(100); v[0] = 7;` on an empty vector?
+**Answer:** `reserve` changes capacity, not size; no element 0 exists, so `operator[]` is UB. Use
+`resize(100)` to construct elements or `push_back`/`emplace_back` to grow the size.
+
+**Q11.** `lower_bound` vs `find` on a sorted vector?
+**Answer:** `lower_bound` is O(log n) comparisons and returns the first element not less than the key;
+`find` is an O(n) equality scan. But `lower_bound` requires the range to be sorted under the same
+comparator.
+
+**Q12.** When is `variant` preferable to virtual inheritance?
+**Answer:** When the set of alternatives is closed/known and value storage, exhaustiveness, and
+allocation-free dispatch matter. Virtual inheritance is better for an open/extensible set behind a
+stable interface.
 
 ---
 
@@ -334,8 +554,13 @@ Squarepoint, Jump, HRT, NK Securities, Millennium.)*
   but keeps refs).
 - Use **standard algorithms** (`sort`, `lower_bound`, erase-remove) and C++20 **ranges/views**; pass
   callables as **lambdas/template params** (inlinable), not `std::function`, on the hot path.
+- Know the broader families: ordered trees provide sorted O(log n) operations; unordered containers
+  provide average O(1) but require coherent hash/equality and startup capacity planning; adapters
+  intentionally restrict an underlying container.
+- Use vocabulary types deliberately: `optional` for absence, `variant` for a closed alternative set,
+  named structs over opaque tuples, and non-owning views only with a proven lifetime.
 - `reserve` when the size is known, and remember **SSO** makes short strings allocation-free — small
   layout facts with real latency impact.
 
-**Next:** [13 — Smart pointers & ownership](13-smart-pointers.md) — who owns the heap allocations, and
+**Next:** [14 — Smart pointers & ownership](14-smart-pointers.md) — who owns the heap allocations, and
 how RAII automates freeing them.

@@ -1,6 +1,6 @@
-# Module 9 — Move semantics & rvalue references (deep)
+# Module 11 — Move semantics & rvalue references (deep)
 
-Module 4 gave the intuition (steal from temporaries instead of copying them). This module makes you
+Module 5 gave the intuition (steal from temporaries instead of copying them). This module makes you
 *fluent* — the subtleties that separate "heard of moves" from "understands moves," which is exactly
 what HFT interviews probe. If you can explain reference collapsing, why `return std::move(x)` is
 wrong, and the `noexcept`-move / vector-realloc link without hesitating, you're in the top tier of
@@ -35,7 +35,7 @@ just a copy (and that's fine — no harm).
 
 ## 2. Value categories, one level deeper
 
-Module 4 introduced lvalues (have a name/address, persist) and rvalues (temporaries, about to die).
+Module 5 introduced lvalues (have a name/address, persist) and rvalues (temporaries, about to die).
 The standard actually splits values into finer categories, and interviewers occasionally push here:
 
 - **lvalue** — has identity, can't be (implicitly) moved from: a named variable `x`, `*p`, `arr[i]`.
@@ -427,4 +427,4 @@ precisely *where* moves help (resource-owning members, growing vectors) and wher
 - Moved-from = **valid but unspecified** (destroy/reassign OK, don't read the value). Don't write
   `return std::move(local)` — it kills NRVO. Use by-value + `std::move` for sink parameters.
 
-**Next:** [10 — Templates → Concepts](10-templates-concepts.md)
+**Next:** [12 — Templates → Concepts](12-templates-concepts.md)

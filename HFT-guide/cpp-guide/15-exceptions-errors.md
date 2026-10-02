@@ -1,4 +1,4 @@
-# Module 14 — Exceptions, `noexcept`, error handling without exceptions
+# Module 15 — Exceptions, `noexcept`, error handling without exceptions
 
 Every non-trivial function can fail — a division by zero, a malformed message, a full queue, a rejected
 order. How you *signal* that failure and how the caller *handles* it is a design decision with real
@@ -32,7 +32,7 @@ Three things happen when `throw` fires:
 
 1. An exception object is constructed (usually in a special exception-storage area, not the normal stack).
 2. The stack **unwinds**: control walks *up* the call stack looking for a matching `catch`. As it leaves
-   each frame, **every local object's destructor runs** — this is RAII (Module 7) doing cleanup. Locks
+   each frame, **every local object's destructor runs** — this is RAII (Module 9) doing cleanup. Locks
    release, files close, heap buffers free, all automatically.
 3. When a matching `catch` is found, its body runs; execution continues after the `try/catch`.
 
@@ -70,7 +70,7 @@ this vocabulary — and being able to classify a given function — is a standar
 - **No-throw guarantee**: the function never throws. Mark it `noexcept`. (Destructors, swaps, moves you
   intend to be fast should be here.)
 - **Strong guarantee**: if it throws, program state is **completely unchanged** — commit-or-rollback,
-  like a database transaction. The canonical technique is **copy-and-swap** (Module 7): do all the
+  like a database transaction. The canonical technique is **copy-and-swap** (Module 9): do all the
   work that can throw on a *copy*, then swap it in with a `noexcept` swap.
 - **Basic guarantee**: if it throws, no resources leak and all invariants still hold, but observable
   state *may* have changed (e.g. a container might have partially updated). This is the minimum a sane
@@ -94,7 +94,7 @@ void f() noexcept;   // promise: never throws. If it does anyway -> std::termina
 
 - **It enables optimizations.** The compiler needn't emit unwinding scaffolding around a `noexcept` call,
   and can keep more state in registers across it.
-- **`std::vector` moves elements only if the element's move constructor is `noexcept`** (Module 9).
+- **`std::vector` moves elements only if the element's move constructor is `noexcept`** (Module 11).
   Otherwise, to preserve the strong guarantee during a reallocation, it **copies** every element — turning
   an O(n) move into an O(n) deep copy. This alone makes `noexcept` on your move constructor effectively
   mandatory.
@@ -138,7 +138,7 @@ So the HFT objection is **not** the happy-path cost (there is none). It's three 
    about the worst case, not the average — a rare microsecond-scale unwind on the matching path is
    unacceptable.
 2. **Binary size / instruction-cache pressure.** Exception tables and generated cleanup code bloat the
-   binary, evicting hot code from the i-cache (Module 15) and slowing the *happy* path indirectly.
+   binary, evicting hot code from the i-cache (Module 16) and slowing the *happy* path indirectly.
 3. **Determinism.** Some shops compile the whole hot path with `-fno-exceptions` for a provably
    exception-free, deterministic binary.
 
@@ -324,7 +324,7 @@ deterministic latency."
 - `std::optional<Order*>` (or an index sentinel) for "find order by ID," since a miss is an ordinary
   expected result. `std::expected` for parse routines that need to report *why* a message was rejected.
 - This exceptions-cold / codes-hot split is precisely the design you'd defend in an interview, and it
-  ties directly back to `noexcept` moves (Module 9) enabling cheap `std::vector<Trade>` growth for the
+  ties directly back to `noexcept` moves (Module 11) enabling cheap `std::vector<Trade>` growth for the
   fills log.
 
 ---
@@ -343,5 +343,5 @@ deterministic latency."
 - On the hot path, signal failure with **status enums, `std::expected`, `std::optional`, `error_code`** —
   predictable, unwinding-free. Reserve exceptions for cold, truly-exceptional conditions.
 
-**Next:** [15 — Memory model, cache, alignment, false sharing](15-memory-cache.md) — how the hardware
+**Next:** [16 — Memory model, cache, alignment, false sharing](16-memory-cache.md) — how the hardware
 actually decides your latency.

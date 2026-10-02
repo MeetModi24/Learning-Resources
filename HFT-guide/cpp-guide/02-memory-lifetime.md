@@ -1,4 +1,4 @@
-# Module 1 — Memory & object lifetime: stack vs heap
+# Module 2 — Memory & object lifetime: stack vs heap
 
 Before pointers, before classes, you need a correct model of **where data lives** and **when it
 dies**. Nearly every C++ bug (dangling pointers, leaks, use-after-free) and nearly every
@@ -117,7 +117,7 @@ These two words sound like synonyms. They are not, and interviewers separate the
 
 For stack (automatic) variables they coincide almost exactly: enter the block, the object is born
 (constructed); leave the block, it dies (destructed). This tight coupling is one of C++'s central
-guarantees and the entire basis of RAII (Module 7): tie a resource — heap memory, a file, a lock,
+guarantees and the entire basis of RAII (Module 9): tie a resource — heap memory, a file, a lock,
 a socket — to a stack object, and the resource is released automatically the instant scope exits,
 *even if an exception is thrown while unwinding*.
 
@@ -128,7 +128,7 @@ a socket — to a stack object, and the resource is released automatically the i
 ```
 
 But they can diverge. A `static` local has a lifetime spanning the whole program yet a scope
-limited to its function. A heap object (Module 3) has a lifetime you control manually and *no* name
+limited to its function. A heap object (Module 4) has a lifetime you control manually and *no* name
 at all — you reach it only through a pointer. Keeping "how long it lives" and "where I can name it"
 as separate axes in your head is what lets you reason about dangling pointers and moved-from
 objects later.
@@ -163,7 +163,7 @@ getPointer() returns &local ──┐
 ```
 
 **Rule: never return the address or reference of a local variable.** If data must outlive the
-function that created it, it belongs on the heap (Module 3) or must be passed in by the caller. This
+function that created it, it belongs on the heap (Module 4) or must be passed in by the caller. This
 single rule is *the* reason the heap exists in most programs.
 
 ---
@@ -262,7 +262,7 @@ dangling pointer can still show the old value.
 `counter`?
 **Answer:** No. Each thread has its **own stack**, so each call frame — and each automatic local —
 is per-thread and per-call. Locals are never shared across threads unless you take their address and
-publish it. (This is why the SPSC queue in Module 16 must use `std::atomic` for shared state, not a
+publish it. (This is why the SPSC queue in Module 18 must use `std::atomic` for shared state, not a
 plain local.)
 
 **Q7.** Predict the output:
@@ -281,7 +281,7 @@ as a local?
 **Answer:** The `std::string` *object* `s` (its pointer/size/capacity, ~24–32 bytes) is on the
 stack; the *character buffer* it manages is on the **heap** (for a string long enough to exceed the
 Small String Optimization buffer). Short strings live entirely inside `s` on the stack (SSO). This
-"handle on stack, payload on heap" split is the theme of Module 3.
+"handle on stack, payload on heap" split is the theme of Module 4.
 
 ---
 
@@ -302,7 +302,7 @@ locals is just moving `rsp` — no allocator, which is why it's ~free.
 *Model answer:* Stack allocation is a single pointer adjustment with no search or synchronization,
 and the top of the stack is almost always hot in L1 cache. Heap allocation must search a free-list /
 size classes, maintain metadata, may take a lock (shared across threads), and may fault in new pages
-via a syscall — all with variable cost. Latency *and* variance are worse. (See Module 3.)
+via a syscall — all with variable cost. Latency *and* variance are worse. (See Module 4.)
 
 **Q. "A junior returns `&local` from a function. What's wrong, and would it always crash?"**
 *Model answer:* It's a dangling pointer — the local's frame is popped on return, so the address
@@ -335,7 +335,7 @@ Orders must rest in the book across many function calls — from the moment they
 filled or cancelled, which may be seconds or hours later. They therefore **cannot** live on the
 stack of the function that received them; that frame is popped almost immediately, and any pointer
 into it would dangle. So order storage is heap-backed — and, on the hot path, specifically a
-**pre-allocated object pool** (Module 3) rather than per-order `new`, to get heap *lifetime* without
+**pre-allocated object pool** (Module 4) rather than per-order `new`, to get heap *lifetime* without
 heap *latency*.
 
 Transient things — a loop index, a temporary price computed while walking a price level, a scratch
@@ -358,7 +358,7 @@ model everything else in this guide builds on.
   dangles; it often "works" in testing, which makes it worse.
 - Prefer brace init (`int x{};`); reading an uninitialized built-in is **UB**, not a random value.
 - Data that must outlive its creating function belongs on the heap (via an RAII owner) — this is the
-  bridge into Module 3.
+  bridge into Module 4.
 
-**Next:** [Module 2 — Pointers & references](02-pointers-references.md) — how you refer to objects
+**Next:** [Module 3 — Pointers & references](03-pointers-references.md) — how you refer to objects
 indirectly, the machinery every data structure and the whole order-book graph is built on.

@@ -1,4 +1,4 @@
-# Module 17 — Zero-cost abstraction, CRTP, branch elimination
+# Module 19 — Zero-cost abstraction, CRTP, branch elimination
 
 The C++ promise, in one sentence: *"you don't pay for what you don't use, and what you do use, you
 couldn't hand-code better."* This module is the toolkit for **abstraction without runtime cost** —
@@ -24,14 +24,14 @@ Concrete examples you already use:
 - `std::unique_ptr<T>` is the same size (one pointer) and the same speed as a raw `T*`, but adds
   automatic cleanup. The safety is free.
 
-Contrast that with a **non**-zero-cost abstraction: a virtual function call (Module 11) forces the
+Contrast that with a **non**-zero-cost abstraction: a virtual function call (Module 8) forces the
 CPU to load a function address from a vtable at runtime and jump to it — an *indirect call* the
 compiler usually can't inline or predict. `std::function` is worse: it may heap-allocate and it
 always dispatches through a type-erased indirection.
 
 The enemies of zero-cost are all forms of **runtime indirection**:
 
-1. **Virtual calls** — the vtable jump (Module 11).
+1. **Virtual calls** — the vtable jump (Module 8).
 2. **`std::function`** — type erasure + possible allocation.
 3. **Unpredictable branches** — the CPU guesses which way an `if` goes; a wrong guess flushes the
    pipeline (~15–20 cycles on a modern core).
@@ -159,7 +159,7 @@ bool crosses(Side s, std::int64_t restPrice, std::int64_t incoming) {
 ```
 
 Make `Side` a **template parameter** instead of a runtime argument, and use `if constexpr`
-(Module 10) to discard the untaken branch at compile time:
+(Module 12) to discard the untaken branch at compile time:
 
 ```cpp
 // Compile-time — the branch DISAPPEARS; the compiler generates two specialized functions:
@@ -215,7 +215,7 @@ Three related tools for shrinking or eliminating call overhead:
 - **Force inlining** (rarely, and only after measuring) with `[[gnu::always_inline]]` /
   `__attribute__((always_inline))` for tiny, hot functions the compiler is being too conservative
   about. Overusing this bloats the binary and can *hurt* by evicting other hot code from i-cache.
-- **`constexpr`** (Module 5) is the ultimate zero-cost: it moves computation to *compile time*
+- **`constexpr`** (Module 6) is the ultimate zero-cost: it moves computation to *compile time*
   entirely. A `constexpr` lookup table or mask is computed once by the compiler and baked into the
   binary as data — the runtime cost is zero because the work already happened.
 
@@ -445,5 +445,5 @@ the counters match the manual version, it's genuinely zero-cost — never assume
 - Use these on hot, small-type-set paths — **not everywhere.** Premature templating bloats the
   binary, hurts i-cache, and wrecks readability. Measure before and after.
 
-**Next:** [18 — C++20 features that matter](18-cpp20-features.md) — concepts, `<bit>`, `std::span`,
+**Next:** [20 — C++20 features that matter](20-cpp20-features.md) — concepts, `<bit>`, `std::span`,
 ranges, and the defensible "what I actually used" story.

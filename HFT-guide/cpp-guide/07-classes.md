@@ -1,7 +1,7 @@
-# Module 6 — Classes: constructors, destructors, `this`, access control
+# Module 7 — Classes: constructors, destructors, `this`, access control
 
 A class bundles **data** (members) with **behavior** (methods) and controls **who can touch what**.
-This module is the machinery; Module 7 (RAII) is the philosophy that gives it purpose. For HFT the
+This module is the machinery; Module 9 (RAII) is the philosophy that gives it purpose. For HFT the
 class is not just an abstraction tool — its *memory layout* (member order, padding, alignment,
 whether it has a vtable) directly determines cache behavior and latency, so interviewers expect you
 to reason about a class as bytes, not just as an API. We build the concept from zero and then look at
@@ -78,7 +78,7 @@ sizeof(Good) == 16    (8 bytes saved — one third smaller, same fields)
 ```
 
 **Rule interviewers love:** order members **largest alignment first** to minimize padding. On the hot
-path a 16-byte order vs a 24-byte order means more orders per cache line (Module 15), so this is a
+path a 16-byte order vs a 24-byte order means more orders per cache line (Module 16), so this is a
 real latency lever, not pedantry.
 
 - **`alignof(T)`** = the required address multiple (usually `sizeof` the largest scalar member).
@@ -86,7 +86,7 @@ real latency lever, not pedantry.
 - **`this`** is just the address of that byte block (Section 4).
 
 You can force layout with `alignas` (e.g. `alignas(64)` to put a hot member on its own cache line —
-Module 15/16) or ask the compiler to skip padding with `#pragma pack` (rarely, for wire formats — it
+Module 16/18) or ask the compiler to skip padding with `#pragma pack` (rarely, for wire formats — it
 costs unaligned-access performance).
 
 ---
@@ -118,8 +118,8 @@ class Widget {
 public:
     Widget() = default;                 // default ctor (no args)
     Widget(int x);                      // parameterized
-    Widget(const Widget&) = default;    // copy ctor (Module 7)
-    Widget(Widget&&) = default;         // move ctor (Modules 4, 9)
+    Widget(const Widget&) = default;    // copy ctor (Module 9)
+    Widget(Widget&&) = default;         // move ctor (Modules 5, 11)
     explicit Widget(double d);          // explicit: no implicit conversions
 };
 ```
@@ -133,6 +133,79 @@ take(3.0);   // if the double ctor is explicit → ERROR (good: no silent double
 
 **Mark single-argument constructors `explicit`** unless you *want* implicit conversion. Silent
 conversions are a classic source of "why did my `Order` get constructed from an `int`?" bugs.
+
+### Default member initializers and delegating constructors
+
+Put a member's ordinary default beside its declaration, then let constructors override only what is
+different:
+
+```cpp
+class Order {
+    std::uint64_t id_{};
+    std::uint32_t qty_{};
+    Side side_{Side::Buy};
+
+public:
+    Order() = default;                         // uses all in-class defaults
+    Order(std::uint64_t id, std::uint32_t qty)
+        : id_{id}, qty_{qty} {}                // side_ still uses Side::Buy
+};
+```
+
+A **delegating constructor** invokes another constructor of the same class. Use it to keep validation
+and invariants in one canonical constructor:
+
+```cpp
+class PriceBand {
+    Price low_;
+    Price high_;
+public:
+    PriceBand(Price low, Price high) : low_{low}, high_{high} {
+        if (high < low) throw std::invalid_argument{"inverted band"};
+    }
+
+    explicit PriceBand(Price center)
+        : PriceBand{center, center} {}          // delegates; no duplicated invariant logic
+};
+```
+
+The delegating initializer must be the only mem-initializer; the target constructor initializes the
+whole object first, then the delegating constructor's body runs.
+
+### Aggregates and designated initialization
+
+An **aggregate** is a simple data-shaped type that supports aggregate initialization. C++20
+designated initializers make configuration-like objects readable:
+
+```cpp
+struct EngineConfig {
+    std::size_t max_orders{1'000'000};
+    bool pin_thread{true};
+    unsigned cpu{};
+};
+
+EngineConfig cfg{.max_orders = 2'000'000, .pin_thread = true, .cpu = 4};
+```
+
+Designators must follow member declaration order in C++. Aggregates are excellent for transparent
+data/configuration. Use a class with constructors and private members when invalid intermediate
+states must be impossible.
+
+### Composition before inheritance
+
+If one object **has a** component, store it as a member; inherit only for a real substitutable
+**is-a** relationship:
+
+```cpp
+class OrderQueue {
+    std::vector<Order> storage_;                // a queue has storage
+public:
+    void push(Order order) { storage_.push_back(std::move(order)); }
+};
+```
+
+Composition gives explicit ownership, predictable layout, and no vtable. Inheritance and dynamic
+polymorphism come immediately next in Module 8.
 
 ---
 
@@ -178,11 +251,11 @@ public:
 ### When it runs (automatically, on every exit path)
 
 1. **Stack object leaves scope** — at the closing `}`. This *is* the "automatic cleanup at scope exit"
-   from Module 1; the destructor is what runs.
+   from Module 2; the destructor is what runs.
 2. **Heap object is `delete`d** — `delete` runs the destructor *first*, then releases the raw memory.
 3. **The enclosing object is destroyed** — each member's destructor runs too (order below).
 4. **Exception unwinding** — as an exception propagates, destructors of all locals between `throw` and
-   `catch` fire. This is what makes RAII exception-safe (Module 14).
+   `catch` fire. This is what makes RAII exception-safe (Module 15).
 
 The guarantee across all four: cleanup happens no matter *how* you leave — normal return, early
 return, or exception. You write the `delete`/`fclose` once; it can't be skipped.
@@ -194,7 +267,7 @@ return, or exception. You write the `delete`/`fclose` once; it can't be skipped.
 2. **Members** are destroyed *after* the enclosing destructor's body runs, in **reverse declaration
    order**. You usually write nothing to clean them up — their own destructors run automatically. If
    every member is self-cleaning, your destructor body is often empty (or unneeded).
-3. **Base class** destructor runs *after* the derived one (Module 11): derived cleanup first, then
+3. **Base class** destructor runs *after* the derived one (Module 8): derived cleanup first, then
    base.
 
 ### Virtual destructors (deleting through a base pointer)
@@ -212,7 +285,7 @@ delete p;   // virtual:  ~Derived (frees buf) then ~Base.  ✅
 ```
 
 Rule: **any class meant to be inherited from and deleted polymorphically needs a `virtual`
-destructor.** (Full treatment in Module 11.) Corollary: adding `virtual` also adds a vtable pointer to
+destructor.** (Full treatment in Module 8.) Corollary: adding `virtual` also adds a vtable pointer to
 every object (Section 8), so *don't* make destructors virtual on hot POD types you never delete
 polymorphically.
 
@@ -258,7 +331,7 @@ The rule underneath: **destroying a member = calling that member's destructor.**
 meaningful one; RAII types do. This is the core reason to prefer `vector`/smart pointers over
 `new`/`delete` — with them, "no destructor needed" is genuinely safe; with raw pointers, a forgotten
 destructor is a silent leak. (And once a member manages the resource, you often need *no* destructor,
-copy ctor, or move ctor at all — the "Rule of Zero," Module 7.)
+copy ctor, or move ctor at all — the "Rule of Zero," Module 9.)
 
 ---
 
@@ -292,7 +365,7 @@ memory exactly where a `public` one would.
 
 ---
 
-## 8. Layout with virtual functions (a preview of Module 11)
+## 8. Layout with virtual functions (a preview of Module 8)
 
 The moment a class has *any* virtual function, the compiler adds a hidden **vptr** (vtable pointer) —
 usually as the first 8 bytes of the object — pointing to a per-class table of function addresses:
@@ -313,7 +386,7 @@ sizeof grew by 8 bytes; a virtual call = load vptr → index table → indirect 
 This is why a POD `Order` should have **no** virtual functions on the hot path: the extra 8 bytes
 shrink orders-per-cache-line, and every virtual call is an indirect branch the CPU may mispredict.
 Interviewers ask "what does adding `virtual` cost?" — the answer is *8 bytes per object + an indirect
-call + lost inlining*, covered fully in Module 11.
+call + lost inlining*, covered fully in Module 8.
 
 ---
 
@@ -324,7 +397,7 @@ call + lost inlining*, covered fully in Module 11.
 - **Missing destructor on a raw-owning class** — silent leak; missing *virtual* destructor on a base →
   UB on polymorphic delete.
 - **Non-`explicit` single-arg ctor** — enables surprising implicit conversions.
-- **Throwing from a destructor** — during stack unwinding this calls `std::terminate` (Module 14).
+- **Throwing from a destructor** — during stack unwinding this calls `std::terminate` (Module 15).
 - **Assuming access control affects layout** — it doesn't; `private`/`public` is compile-time only.
 - **Padding surprises** — `sizeof` isn't the sum of member sizes; reorder to minimize it.
 - **Using an object before its base/members are constructed** — calling a virtual from a base
@@ -388,7 +461,7 @@ identical. Interviewers ask this to check you're not carrying C baggage.
 
 **Answer:** When all members are self-cleaning RAII types (`vector`, `string`, `unique_ptr`). Writing
 `~C() {}` there is at best redundant and at worst *suppresses* the implicitly-generated move
-operations (Module 7), silently degrading moves to copies. Prefer no destructor.
+operations (Module 9), silently degrading moves to copies. Prefer no destructor.
 
 **Q9.** Order these members to minimize `sizeof`: `char c; double d; int i; short s;`
 
@@ -409,7 +482,7 @@ matters because a smaller order means more orders per 64-byte cache line.
 **Q (Optiver / IMC): "What's the cost of making a class polymorphic (adding `virtual`)?"**
 8 bytes per object for the vptr, an indirect call through the vtable per virtual invocation (load
 vptr → index → call), loss of inlining, and possible branch misprediction. On a hot POD type you
-avoid it; use CRTP or non-virtual designs (Module 17) instead.
+avoid it; use CRTP or non-virtual designs (Module 19) instead.
 
 **Q (Quadeye / AlphaGrep): "In what order are constructors and destructors called for members and base
 classes?"**
@@ -452,9 +525,9 @@ invariants (price-time priority) behind a clean public interface (`addLimitOrder
 Destructor angle: `OrderPool`'s `storage` vector has **one** destructor call that frees the whole slab
 at shutdown — and during trading **no per-order destructors fire** (you recycle slots via the
 free-list, you don't destroy `Order`s). Fewer destructor calls on the hot path is part of why it's
-fast. The same logic drives the move ctor's `other.data = nullptr` in Module 4: you empty the source
+fast. The same logic drives the move ctor's `other.data = nullptr` in Module 5: you empty the source
 precisely so *its* destructor frees nothing (no double free). And because `Order` is all
-self-cleaning/scalar members, it obeys the **Rule of Zero** (Module 7) — no hand-written destructor,
+self-cleaning/scalar members, it obeys the **Rule of Zero** (Module 9) — no hand-written destructor,
 copy, or move needed.
 
 ---
@@ -476,5 +549,5 @@ copy, or move needed.
 - Adding `virtual` costs **8 bytes/object (vptr) + an indirect call + lost inlining** — avoid it on hot
   POD types.
 
-**Next:** [07 — RAII & the Rule of 0/3/5](07-raii-rule-of-five.md) — the philosophy that turns
-constructors and destructors into leak-proof resource management.
+**Next:** [08 — Inheritance, virtual functions & vtables](08-inheritance-virtual.md) — runtime
+polymorphism, object layout, and when composition or static dispatch is the better design.

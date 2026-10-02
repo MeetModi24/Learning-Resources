@@ -1,10 +1,10 @@
-# Module 16 — `std::atomic`, memory ordering, lock-free basics
+# Module 18 — `std::atomic`, memory ordering, lock-free basics
 
 Concurrency without locks. This is "table stakes for HFT" and the hardest interview territory in the
 whole track — the topic that most reliably separates candidates who *memorized* C++ from those who
 *understand* the machine. The goal of this module is a correct mental model plus the one lock-free
 structure you'll actually build and be asked to whiteboard: the single-producer/single-consumer ring
-buffer. We build directly on Module 15: atomics and memory ordering are the software knobs that ride
+buffer. We build directly on Module 16: atomics and memory ordering are the software knobs that ride
 on top of the MESI cache-coherency hardware you just met.
 
 ---
@@ -220,7 +220,7 @@ writer, you need *no CAS at all* — just acquire/release. It's wait-free on bot
 ```cpp
 template <typename T, std::size_t N>       // N MUST be a power of two
 class SpscQueue {
-    // Separate cache lines → no false sharing between producer and consumer (Module 15).
+    // Separate cache lines → no false sharing between producer and consumer (Module 16).
     alignas(64) std::atomic<std::size_t> head_{0};  // consumer owns (writes) this
     alignas(64) std::atomic<std::size_t> tail_{0};  // producer owns (writes) this
     T buffer_[N];
@@ -261,9 +261,9 @@ State picture (N = 8):
 
 Every optimization from earlier modules shows up here:
 
-- **`alignas(64)`** on `head_`/`tail_` prevents **false sharing** (Module 15) — otherwise the two
+- **`alignas(64)`** on `head_`/`tail_` prevents **false sharing** (Module 16) — otherwise the two
   indices share a line and the producer/consumer ping-pong it on every op. This alone can be a 10×.
-- **Power-of-two `N`** lets `& (N-1)` replace the expensive `% N` (Module 18 bit tricks).
+- **Power-of-two `N`** lets `& (N-1)` replace the expensive `% N` (Module 20 bit tricks).
 - **`relaxed` for your own index** (only you write it) but **`acquire`/`release` to synchronize with
   the other thread** — the release-store of `tail_` publishes the `buffer_[t] = v` write; the
   consumer's acquire-load of `tail_` consumes it, so `out = buffer_[h]` safely sees the data.
@@ -371,7 +371,7 @@ spuriously (e.g. an interrupt between LL and SC). `weak` maps directly to one LL
 
 **Q9.** Your producer and consumer indices are `std::atomic<size_t> head_, tail_;` declared
 adjacently with no `alignas`. Throughput is terrible under contention. Diagnose and fix.
-**Answer:** `head_` and `tail_` share a cache line → **false sharing** (Module 15): every producer
+**Answer:** `head_` and `tail_` share a cache line → **false sharing** (Module 16): every producer
 write to `tail_` invalidates the consumer's line and vice versa, ping-ponging on every op. Fix:
 `alignas(64)` each (or `hardware_destructive_interference_size`) so each owns a line.
 
@@ -445,7 +445,7 @@ Crucially, **the matching engine itself is single-threaded**: one thread owns th
 book across cores would mean locks or complex lock-free structures on the hottest data — usually
 *slower* (coherency traffic, false sharing, ABA) than a single core running the whole match with the
 book resident in its L1/L2. So the concurrency lives at the *edges* (lock-free queues in and out),
-not the core. The producer's `tail_` and consumer's `head_` get `alignas(64)` (Module 15) so the two
+not the core. The producer's `tail_` and consumer's `head_` get `alignas(64)` (Module 16) so the two
 threads never fight over a cache line — the exact false-sharing fix, applied where it earns its keep.
 
 ## Key takeaways
@@ -466,5 +466,5 @@ threads never fight over a cache line — the exact false-sharing fix, applied w
 - HFT design: concurrency at the **edges** (lock-free queues), single-threaded matching core with
   the book cache-resident.
 
-**Next:** [17 — Zero-cost abstraction, CRTP, branch elimination](17-zero-cost-crtp.md) — making
+**Next:** [19 — Zero-cost abstraction, CRTP, branch elimination](19-zero-cost-crtp.md) — making
 high-level abstractions compile down to the same fast code you'd write by hand.

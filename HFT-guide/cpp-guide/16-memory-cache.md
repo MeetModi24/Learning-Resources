@@ -1,9 +1,9 @@
-# Module 15 — Memory model, cache, alignment, false sharing
+# Module 16 — Memory model, cache, alignment, false sharing
 
 This is where "systems programming" stops being an abstraction and becomes literal physics: you
 optimize for how the CPU *physically* moves bytes from DRAM into the registers where arithmetic
 happens. Up to now the mental model has been "memory is a flat array of bytes you access in one
-step" (Module 1). That model is a **lie the hardware tells you** — a convenient fiction. In reality
+step" (Module 2). That model is a **lie the hardware tells you** — a convenient fiction. In reality
 there is a steep hierarchy of caches between the core and RAM, and in HFT the difference between an
 L1 hit (~1 ns) and a main-memory miss (~100 ns) is, quite literally, the whole game. A strategy that
 computes the right answer 100 ns too late has computed the wrong answer.
@@ -105,7 +105,7 @@ Three consequences flow from this, and they explain most of practical performanc
   predict where you'll go next. Each hop can cost ~100 ns.
 
 This is *the* reason `std::vector` beats `std::list`, and a flat array beats `std::map`, far beyond
-what their big-O suggests (Module 12). Big-O counts operations; it says nothing about whether each
+what their big-O suggests (Module 13). Big-O counts operations; it says nothing about whether each
 operation is a 1 ns L1 hit or a 100 ns DRAM miss.
 
 ### Cache-line math (an interview staple)
@@ -201,7 +201,7 @@ fields to a side array, so the hot data packs densely and no line is diluted by 
 struct Order {          // HOT — touched on every match
     std::int64_t  price;
     std::uint32_t qty;
-    std::uint32_t next;   // link index (Module 2/15): 32-bit index, not 64-bit pointer
+    std::uint32_t next;   // link index (Modules 3/16): 32-bit index, not 64-bit pointer
 };                        // 16 bytes → 4 per cache line
 
 // COLD — parked in a parallel array, indexed by the same id:
@@ -259,7 +259,7 @@ struct Counters {
 
 This is a real, recurring bug in the SPSC-queue projects this track builds toward: the producer's
 `tail_` index and the consumer's `head_` index must sit on separate lines, or the two threads fight
-over one line on every single push/pop (see Module 16).
+over one line on every single push/pop (see Module 18).
 
 ---
 
@@ -294,7 +294,7 @@ Two more hardware realities that shape hot-path code:
   branches (loop conditions, "this error basically never happens" checks) cost nothing; the
   predictor learns them. *Data-dependent, 50/50 random* branches are the killers. `[[likely]]` /
   `[[unlikely]]` (C++20) hint the compiler which path is hot so it lays out code to favour it.
-  Branch-*free* code (Module 17) removes the risk entirely on the hottest paths.
+  Branch-*free* code (Module 19) removes the risk entirely on the hottest paths.
 - **Prefetching.** The hardware prefetcher is excellent at *linear* patterns — lean on it by keeping
   data contiguous. `__builtin_prefetch(ptr)` lets you *manually* hint an upcoming access (e.g. next
   order in a linked structure) a few iterations early, but measure: a bad prefetch pollutes cache
@@ -308,7 +308,7 @@ Two more hardware realities that shape hot-path code:
   before believing any micro-optimization.
 - **`std::list`/`std::map`/node-based containers on the hot path.** Each element is a separate heap
   allocation at a random address — a pointer-chase and likely a miss per element. Prefer contiguous
-  containers (Module 12).
+  containers (Module 13).
 - **Fat hot structs.** Every cold byte you leave in a hot struct dilutes every cache line you load.
 - **Assuming member order doesn't matter.** It changes `sizeof` and packing density.
 - **False sharing you can't see.** Two adjacent per-thread counters, or a lock next to the data it
@@ -353,7 +353,7 @@ arrays (three streams).
 
 **Q5.** Two threads, no atomics, no locks: thread 1 writes `g_x = 1`, thread 2 reads `g_x`. Is this
 a data race? Does putting `g_x` in its own cache line fix it?
-**Answer:** **Yes, a data race → UB** (Module 16). Cache-line separation fixes *false sharing*
+**Answer:** **Yes, a data race → UB** (Modules 17–18). Cache-line separation fixes *false sharing*
 (a performance problem), not *data races* (a correctness/UB problem). Different problems — you need
 atomics or a lock for correctness regardless of layout.
 
@@ -365,7 +365,7 @@ arithmetic difference. Count misses, not ops.
 
 **Q7.** You add one `std::string clientId` field to a hot 16-byte `Order` struct used in a tight
 matching loop. Latency doubles even though you never read `clientId` in the loop. Why?
-**Answer:** `std::string` is ~32 bytes (Module 12) → `Order` balloons to ~48+ bytes, so fewer orders
+**Answer:** `std::string` is ~32 bytes (Module 13) → `Order` balloons to ~48+ bytes, so fewer orders
 fit per line (1–2 instead of 4), and every loaded line now carries dead `clientId` bytes. The hot
 loop's effective bandwidth and packing collapse. Fix: hot/cold split — move `clientId` to a side
 array indexed by order id.
@@ -418,7 +418,7 @@ Millennium/Qube. Cache and layout are *core* C++ HFT territory — expect these 
 
 - **"What's the cost of a branch misprediction, and how do you avoid it on the hot path?"** — ~15–20
   cycles (pipeline flush). Avoid with predictable branches, `[[likely]]`/`[[unlikely]]`, or
-  branch-free code (conditional moves, arithmetic-select) — Module 17.
+  branch-free code (conditional moves, arithmetic-select) — Module 19.
 
 - **"Explain cache coherency at a high level."** — MESI: each line, per core, is Modified/Exclusive/
   Shared/Invalid; writing requires exclusive ownership, invalidating others' copies. This is the
@@ -447,7 +447,7 @@ Everything above converges on concrete design decisions:
   contiguous order pool.
 - **If the pipeline is multithreaded** (input thread → matching thread via an SPSC queue), the
   producer's `tail_` and consumer's `head_` get `alignas(64)` to kill false sharing — the exact fix
-  from Section 6, and the bridge into Module 16.
+  from Section 6, and the bridge into Modules 17–18.
 
 ## Key takeaways
 
@@ -466,5 +466,5 @@ Everything above converges on concrete design decisions:
 - Contiguous, compact, cache-line-aware data structures are why the array-based order book beats the
   tree-based one by far more than big-O predicts.
 
-**Next:** [16 — `std::atomic`, memory ordering, lock-free basics](16-atomics-lockfree.md) — building
-predictable-latency concurrency on top of the coherency machinery you just learned.
+**Next:** [17 — Concurrency fundamentals](17-concurrency-fundamentals.md) — threads, mutexes,
+condition variables, and spinlocks before the lock-free layer.

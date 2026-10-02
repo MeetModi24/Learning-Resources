@@ -1,4 +1,4 @@
-# Module 4 — lvalues, rvalues & an intro to moving
+# Module 5 — lvalues, rvalues & an intro to moving
 
 The distinction beginners find hardest — and it's really a *performance* feature in disguise. Value
 categories exist so the compiler can tell, at each expression, whether an object is something that
@@ -6,7 +6,7 @@ categories exist so the compiler can tell, at each expression, whether an object
 this right and modern C++ returns megabyte objects by value for free; get it wrong and you ship code
 that silently deep-copies on every hot-path call. HFT interviews probe this relentlessly because
 "why is this 10× slower than it should be" almost always traces back to a copy that should have been
-a move. Module 9 goes deep on the mechanics; this module builds the intuition and the mental model
+a move. Module 11 goes deep on the mechanics; this module builds the intuition and the mental model
 of *where things live in memory*.
 
 ---
@@ -133,7 +133,7 @@ Buffer(Buffer&& other) noexcept {   // Buffer&& = rvalue reference: binds only t
 `T&&` (double ampersand) is an **rvalue reference** — a reference that binds *only to rvalues*. It is
 the type system's way for a function to announce: "I know this argument is disposable, so I may gut
 it." (`T&`, a plain lvalue reference, binds to lvalues; `const T&` binds to *both* — that's why it's
-the safe read-only default from Module 2.)
+the safe read-only default from Module 3.)
 
 ### What actually happens byte-for-byte
 
@@ -428,7 +428,7 @@ Compilers warn with `-Wpessimizing-move`.
 **Q (Hudson River / Millennium): "You profiled a hot function returning a `std::vector` and see a
 memcpy of the whole buffer. What went wrong?"**
 Likely a copy where a move was intended: the source was an lvalue you forgot to `std::move`, or the
-type's move ctor isn't `noexcept` (so `vector` growth copies — Module 9), or the local was `const`.
+type's move ctor isn't `noexcept` (so `vector` growth copies — Module 11), or the local was `const`.
 Fix: make the move path reachable (`noexcept` moves, non-`const` locals, `return local;` for NRVO).
 
 **Q (NK Securities / Mansard): "Given `f(int&&)` and `f(const int&)`, trace which is called for a
@@ -448,7 +448,7 @@ get true `O(1)` transfer for an inline-payload type is to move a *pointer to* it
 indirection yourself.
 
 Where moves *do* pay off is the surrounding infrastructure: variable-size input messages, a
-`std::vector<Trade>` fill log that grows (needs `noexcept` moves to grow cheaply — Module 9), and
+`std::vector<Trade>` fill log that grows (needs `noexcept` moves to grow cheaply — Module 11), and
 "sink" APIs that take an argument by value and `std::move` it into storage. Understanding move-vs-copy
 is what lets you reason about *where a hidden copy would otherwise cost you microseconds* on the
 matching path — and articulate it when an interviewer points at a `memcpy` in your flamegraph.
@@ -469,5 +469,5 @@ matching path — and articulate it when an interviewer points at a `memcpy` in 
   read-only parameter default; `T&&` binds only to rvalues.
 - Moved-from objects are **valid but unspecified** — reassign or destroy them, don't read them.
 
-**Next:** [05 — `const`, `constexpr`, const-correctness](05-const-constexpr.md) — promises to the
+**Next:** [06 — `const`, `constexpr`, const-correctness](06-const-constexpr.md) — promises to the
 compiler, and moving work from runtime to compile time.

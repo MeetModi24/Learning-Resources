@@ -1,10 +1,11 @@
-# Module 5 — `const`, `constexpr`, `consteval`, const-correctness
+# Module 6 — `const`, `constexpr`, `consteval`, const-correctness
 
 Two separate ideas share a keyword prefix and confuse everyone at first. `const` is about
 **promises** — "I won't modify this" — a contract checked by the compiler at zero runtime cost.
 `constexpr`/`consteval`/`constinit` are about **when computation happens** — compile time vs runtime.
 HFT cares intensely about both: promises unlock optimizations and make objects safe to share across
-threads for reads (Module 16), and moving work to compile time means it costs *literally nothing* when
+threads for reads when the object is otherwise synchronized (Module 17), and moving work to compile
+time means it costs *literally nothing* when
 the program runs. Interviewers use the `const int* p` vs `int* const p` puzzle and "what's the
 difference between `const` and `constexpr`?" as quick filters — you should be able to answer both
 without hesitating.
@@ -64,7 +65,7 @@ The payoffs:
 - Callers can read a signature and know exactly what a function *won't* modify. `void f(const T&)`
   says "I only read your object."
 - A genuinely `const` object is **safe to share across threads for concurrent reads without a lock**
-  (Module 16) — this is a big deal in low-latency systems.
+  (Module 17) — this is a big deal in low-latency systems.
 - It's a **free** optimization hint: the compiler can keep values in registers, knowing they won't
   change underneath it.
 
@@ -167,7 +168,7 @@ computed by the compiler and **baked into the binary** — zero runtime cost, an
 constexpr std::size_t PriceLevels = 1 << 16;  // 65536, computed at compile time
 int book[PriceLevels];                          // fixed-size array, no runtime sizing
 
-constexpr std::uint64_t mask = PriceLevels - 1; // 0xFFFF — masking replaces modulo (Module 18)
+constexpr std::uint64_t mask = PriceLevels - 1; // 0xFFFF — masking replaces modulo (Module 20)
 ```
 
 ### What can be `constexpr`?
@@ -263,7 +264,7 @@ include guards) — but for *values*, always reach for `constexpr`.
 - **`constexpr` function silently runs at runtime** when inputs aren't constant — fine, but don't
   *assume* compile-time evaluation unless you assign to a `constexpr` variable or use `consteval`.
 - **Members init in declaration order**, not init-list order — a `const` member depending on another
-  can bite you (Module 6).
+  can bite you (Module 7).
 - **`mutable` on logical state** — abusing `mutable` to sidestep `const` breaks the contract callers
   rely on; reserve it for genuinely invisible bookkeeping.
 - **Forgetting `constexpr` variables must be constant** — `constexpr int x = readInput();` won't
@@ -383,10 +384,10 @@ compile-time constant.
 - **Query methods** (`bestBid()`, `spread()`, `qtyAt(price)`) are `const` — they don't mutate the
   book. An interviewer immediately sees you understand read/write separation, and it makes the book
   safe to hand to a read-only snapshot/reporting thread.
-- **`constexpr`** for the price-array size, tick masks, and bitset widths (Module 15): compile-time
-  constants baked into the binary, and power-of-two sizes let `& (N-1)` replace `% N` (Module 18) —
+- **`constexpr`** for the price-array size, tick masks, and bitset widths (Module 16): compile-time
+  constants baked into the binary, and power-of-two sizes let `& (N-1)` replace `% N` (Module 20) —
   no runtime cost at all.
-- **`const Order&`** parameters throughout for cheap, safe, read-only passing (Module 2).
+- **`const Order&`** parameters throughout for cheap, safe, read-only passing (Module 3).
 - **`constinit`** for any global config/table that startup code touches before `main`'s body runs —
   it sidesteps the static-init-order fiasco while still allowing the table to be updated later.
 - **`mutable`** on internal counters/caches (e.g. a cached best-bid, or a hit counter inside a `const`
@@ -409,5 +410,5 @@ compile-time constant.
   a logically `const` method — not a license to mutate logical state.
 - Prefer `constexpr` over `#define` for values: typed, scoped, debuggable, no substitution bugs.
 
-**Next:** [06 — Classes: constructors, destructors, `this`, access control](06-classes.md) — the
+**Next:** [07 — Classes: constructors, destructors, `this`, access control](07-classes.md) — the
 machinery for bundling data with behavior and enforcing invariants.

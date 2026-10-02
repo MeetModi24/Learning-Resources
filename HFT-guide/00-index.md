@@ -7,7 +7,8 @@ build — the market it lives in, the feed handler, and the limit order book & m
 
 The guide is split into two parts, each in its own folder:
 
-- **`cpp-guide/`** — C++ from the memory model up to lock-free systems programming (Modules 1–18).
+- **`cpp-guide/`** — C++ from the build/object model up to lock-free systems programming (Modules
+  1–20).
 - **`hft-infrastructure-guide/`** — the trading-systems domain and the components you build, with its
   own 1-based numbering (Modules 01→02→03…).
 
@@ -22,32 +23,36 @@ infrastructure modules add the domain context and the systems design those C++ s
 
 ## Part A — C++ mastery (`cpp-guide/`)
 
-### Part 0 — Foundations (the memory mental model)
+[Open the compact 20-module C++ roadmap](cpp-guide/README.md), or continue directly below.
 
-1. [Memory & object lifetime: stack vs heap](cpp-guide/01-memory-lifetime.md)
-2. [Pointers & references](cpp-guide/02-pointers-references.md)
-3. [Dynamic memory (`new`/`delete`) & why the heap is slow](cpp-guide/03-dynamic-memory.md)
-4. [lvalues, rvalues & an intro to moving](cpp-guide/04-value-categories.md)
+### Part 0 — Foundations (language + memory mental model)
+
+1. [C++ foundations: build model, types, initialization & casts](cpp-guide/01-cpp-foundations.md)
+2. [Memory & object lifetime: stack vs heap](cpp-guide/02-memory-lifetime.md)
+3. [Pointers & references](cpp-guide/03-pointers-references.md)
+4. [Dynamic memory (`new`/`delete`) & why the heap is slow](cpp-guide/04-dynamic-memory.md)
+5. [lvalues, rvalues & an intro to moving](cpp-guide/05-value-categories.md)
 
 ### Part I — Language mastery
 
-5. [`const`, `constexpr`, `consteval`, const-correctness](cpp-guide/05-const-constexpr.md)
-6. [Classes: constructors, destructors, `this`, access control](cpp-guide/06-classes.md)
-7. [RAII & the Rule of 0/3/5](cpp-guide/07-raii-rule-of-five.md)
-8. [Operator overloading & value semantics](cpp-guide/08-operator-overloading.md)
-9. [Move semantics & rvalue references (deep)](cpp-guide/09-move-semantics.md)
-10. [Templates → Concepts](cpp-guide/10-templates-concepts.md)
-11. [Inheritance, virtual functions, vtables — and when not to use them](cpp-guide/11-inheritance-virtual.md)
-12. [The STL: containers, iterators, algorithms, complexity & cache](cpp-guide/12-stl.md)
-13. [Smart pointers & ownership](cpp-guide/13-smart-pointers.md)
-14. [Exceptions, `noexcept`, error handling without exceptions](cpp-guide/14-exceptions-errors.md)
+6. [`const`, `constexpr`, `consteval`, const-correctness](cpp-guide/06-const-constexpr.md)
+7. [Classes: constructors, destructors, `this`, access control](cpp-guide/07-classes.md)
+8. [Inheritance, virtual functions, vtables — and when not to use them](cpp-guide/08-inheritance-virtual.md)
+9. [RAII & the Rule of 0/3/5](cpp-guide/09-raii-rule-of-five.md)
+10. [Operator overloading & value semantics](cpp-guide/10-operator-overloading.md)
+11. [Move semantics & rvalue references (deep)](cpp-guide/11-move-semantics.md)
+12. [Templates → Concepts](cpp-guide/12-templates-concepts.md)
+13. [The STL: containers, iterators, algorithms, complexity & cache](cpp-guide/13-stl.md)
+14. [Smart pointers & ownership](cpp-guide/14-smart-pointers.md)
+15. [Exceptions, `noexcept`, error handling without exceptions](cpp-guide/15-exceptions-errors.md)
 
 ### Part II — Systems / HFT-specific C++
 
-15. [Memory model, cache, alignment, false sharing](cpp-guide/15-memory-cache.md)
-16. [`std::atomic`, memory ordering, lock-free basics](cpp-guide/16-atomics-lockfree.md)
-17. [Zero-cost abstraction, CRTP, branch elimination](cpp-guide/17-zero-cost-crtp.md)
-18. [C++20 features that matter: concepts, `<bit>`, `std::span`, ranges](cpp-guide/18-cpp20-features.md)
+16. [Memory model, cache, alignment, false sharing](cpp-guide/16-memory-cache.md)
+17. [Concurrency fundamentals: threads, mutexes, condition variables & spinlocks](cpp-guide/17-concurrency-fundamentals.md)
+18. [`std::atomic`, memory ordering, lock-free basics](cpp-guide/18-atomics-lockfree.md)
+19. [Zero-cost abstraction, CRTP, branch elimination](cpp-guide/19-zero-cost-crtp.md)
+20. [C++20 features that matter: concepts, `<bit>`, `std::span`, ranges](cpp-guide/20-cpp20-features.md)
 
 ---
 

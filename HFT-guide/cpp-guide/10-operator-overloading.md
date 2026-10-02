@@ -1,4 +1,4 @@
-# Module 8 — Operator overloading & value semantics
+# Module 10 — Operator overloading & value semantics
 
 Operator overloading lets your types behave like built-ins (`a + b`, `a < b`, `a == b`). Used well it
 makes numeric/domain code read like math; abused, it hides cost behind innocent-looking symbols. HFT
@@ -108,7 +108,7 @@ names for **one** object, so mutating through `b` is visible through `a`:
 // Java-style: List b = a;  b.add(x);  // a sees x too — aliasing
 ```
 
-C++ **defaults to value semantics**. This is precisely why copy/move (Module 7) matter: copying a
+C++ **defaults to value semantics**. This is precisely why copy/move (Module 9) matter: copying a
 value type must duplicate its state so the two objects are independent. In memory:
 
 ```
@@ -151,7 +151,7 @@ public:
 Provide **both** a `const` and a non-`const` overload of `operator[]` so it works whether the object
 is mutable or `const`. The compiler picks the right one based on the constness of the object you index
 — a `const Book&` gets the `const` overload returning `const Limit&`, preventing accidental mutation
-through a read-only handle. This is *const-correctness* (Module 5) applied to operators.
+through a read-only handle. This is *const-correctness* (Module 6) applied to operators.
 
 ### `operator()` — functors (callable objects)
 
@@ -231,7 +231,7 @@ struct Price { std::int64_t ticks; };   // e.g. price in 1/100th-cent ticks — 
 ```
 
 Integer prices are exact, compare with `==` reliably, and — bonus — can be used directly as **array
-indices** into a price-level array (Module 15), which is how the fastest order books avoid a tree
+indices** into a price-level array (Module 16), which is how the fastest order books avoid a tree
 lookup entirely. Saying "I'd never store price as a double; I'd use integer ticks" in the first two
 minutes of a quant interview signals domain awareness instantly.
 
@@ -398,7 +398,7 @@ would a reader correctly predict the cost and effect from the symbol alone?
 `Price`, `Qty`, `OrderId` are strong value types with defaulted `<=>`/`==`, passed **by value** (each
 is one machine word). Price comparison drives the AVL-tree / price-array ordering of levels, and
 because prices are **integer ticks** they double as array indices into a dense price-level array
-(Module 15) — no float error, and O(1) level lookup instead of a tree walk. A `ByPrice` functor (not
+(Module 16) — no float error, and O(1) level lookup instead of a tree walk. A `ByPrice` functor (not
 `std::function`) orders resting orders so the comparison inlines into the sort. `Book::operator[]` has
 const/non-const overloads so read-only views can't mutate the book. Every one of these is a deliberate
 value-semantics + cost-awareness choice, which is exactly what the interview is checking.
@@ -418,4 +418,4 @@ value-semantics + cost-awareness choice, which is exactly what the interview is 
 - Prefer **functors/lambdas over `std::function`** on hot paths (inlining), provide **const +
   non-const `operator[]`**, and use **strong typedefs** to catch unit mix-ups at compile time.
 
-**Next:** [09 — Move semantics & rvalue references (deep)](09-move-semantics.md)
+**Next:** [11 — Move semantics & rvalue references (deep)](11-move-semantics.md)

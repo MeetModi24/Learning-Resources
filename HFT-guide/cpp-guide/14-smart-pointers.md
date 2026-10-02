@@ -1,10 +1,10 @@
-# Module 13 — Smart pointers & ownership
+# Module 14 — Smart pointers & ownership
 
 A **raw** `new` hands you a pointer and a debt: somewhere, someday, you must `delete` it exactly once
 — not zero times (leak), not twice (double-free), and not after someone else already did (use-after-free).
 Smart pointers pay that debt for you by encoding *ownership* — "who is responsible for freeing this
-object" — directly in the type system, so RAII (Module 7) runs the `delete` automatically at the right
-moment. This module is where the abstract lifetime rules of Module 1 become a concrete, everyday design
+object" — directly in the type system, so RAII (Module 9) runs the `delete` automatically at the right
+moment. This module is where the abstract lifetime rules of Module 2 become a concrete, everyday design
 tool. Ownership clarity is one of the things HFT interviewers probe most directly, because a system that
 is fuzzy about who owns what is a system that leaks, races, or crashes under load.
 
@@ -83,7 +83,7 @@ type's *destructor*, which runs at compile-time-known points — there is nothin
 `std::move(p)` after the diagram simply copies the 8-byte address into `q` and writes `nullptr` into `p`.
 
 **Always prefer `std::make_unique<T>(args...)` over `unique_ptr<T>(new T(args...))`.** `make_unique` is
-exception-safe (Module 14 explains the subtle ordering hazard of a bare `new` inside a function-argument
+exception-safe (Module 15 explains the subtle ordering hazard of a bare `new` inside a function-argument
 list), never leaves a raw `new` visible, and reads better.
 
 ### Custom deleters — RAII for C resources
@@ -162,7 +162,7 @@ sharp interviewer will ask it.
 
 1. **The refcount is atomic.** Every copy and destroy is an atomic increment/decrement (`lock xadd` on
    x86). Atomics are far more expensive than a plain integer op and, worse, when multiple cores touch the
-   *same* control block they fight over its cache line (cache-line ping-pong / contention, Module 15).
+   *same* control block they fight over its cache line (cache-line ping-pong / contention, Module 16).
    Passing `shared_ptr` by value into every function silently sprays atomic ops across your hot loop.
 2. **Bigger than a raw pointer** (two words) — doubles the pointer traffic.
 3. **Obscures ownership.** "Everyone owns it" usually means "nobody reasoned about its lifetime." That's
@@ -217,7 +217,7 @@ count so the object can't vanish while you hold it) or an empty one if the objec
 Walk this top-to-bottom and stop at the first match:
 
 1. **Does it even need the heap?** If the object can live on the stack for a bounded scope, put it there
-   (Module 1). No pointer, no ownership question, fastest of all.
+   (Module 2). No pointer, no ownership question, fastest of all.
 2. **Single owner?** → `unique_ptr`. This is the answer ~90% of the time.
 3. **Genuinely shared lifetime you can't statically order?** → `shared_ptr`. Justify it out loud.
 4. **Observe without owning?** → a **raw pointer or reference** (if the owner provably outlives the
@@ -251,7 +251,7 @@ std::unique_ptr<Order> owner;        // owning: this is what frees it
 - **Custom-deleter mismatch**: allocate with `malloc`, free with `delete` (or vice-versa) → UB. The
   deleter must match the allocation.
 - **Throwing destructor** in an object managed by a smart pointer during stack unwinding → `terminate`
-  (Module 14).
+  (Module 15).
 
 ---
 
@@ -368,7 +368,7 @@ count hits 0. Prefer `make_shared` unless you have big objects with long-lived `
 **"Why is shared_ptr's refcount atomic, and why does that hurt in HFT?"**
 Because copies/destroys may happen on different threads, the count must be race-free → atomic RMW. On the
 hot path that means real cost per copy (`lock xadd`) plus cache-line contention when several cores touch
-the same control block (Module 15 false sharing). So we avoid `shared_ptr` in the matching loop entirely.
+the same control block (Module 16 false sharing). So we avoid `shared_ptr` in the matching loop entirely.
 
 **"How do you break a reference cycle?"**
 Make the back-edge a `weak_ptr` so it observes without contributing to the strong count. Use `lock()` to
@@ -380,7 +380,7 @@ raw `T*` today means "I look, I don't free." Owning raw pointers are what smart 
 
 **"You have millions of Orders on the hot path — do you use unique_ptr per order?"**
 No. Even `unique_ptr`'s per-object heap allocation is too expensive and non-deterministic on the hot path.
-Use an **object pool** (Module 3): pre-allocate a contiguous slab up front, hand out **indices or
+Use an **object pool** (Module 4): pre-allocate a contiguous slab up front, hand out **indices or
 non-owning raw pointers** into it, and never allocate in the matching loop. Smart pointers own the
 *infrastructure* (the pool, config, sessions), not individual orders.
 
@@ -393,10 +393,10 @@ path this is the difference between two atomics per call and zero.
 
 ## 9. In the order book
 
-- Orders come from an **object pool** (Module 3), not individual `make_unique` — even `unique_ptr`'s
+- Orders come from an **object pool** (Module 4), not individual `make_unique` — even `unique_ptr`'s
   per-object allocation and the non-determinism of the allocator are unacceptable on the matching path.
   The pool owns the contiguous storage for its whole lifetime; the book holds **non-owning raw pointers
-  or 32-bit indices** into it (indices are half the size and survive pool reallocation — Module 15).
+  or 32-bit indices** into it (indices are half the size and survive pool reallocation — Module 16).
 - `unique_ptr` / `shared_ptr` live in the *cold* infrastructure: the object owning the pool itself, the
   config loaded at startup, the network session, the logging sink. There, clarity beats nanoseconds, so
   smart pointers are exactly right.
@@ -422,5 +422,5 @@ path this is the difference between two atomics per call and zero.
   allocation and atomic refcounts are too slow and non-deterministic; smart pointers stay in the cold
   infrastructure.
 
-**Next:** [14 — Exceptions, `noexcept`, error handling without exceptions](14-exceptions-errors.md) — how
+**Next:** [15 — Exceptions, `noexcept`, error handling without exceptions](15-exceptions-errors.md) — how
 to signal failure, exception-safety guarantees, and why the hot path uses status codes instead.

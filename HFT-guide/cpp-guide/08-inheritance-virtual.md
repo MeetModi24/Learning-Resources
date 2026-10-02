@@ -1,4 +1,4 @@
-# Module 11 — Inheritance, virtual functions, vtables — and when NOT to use them
+# Module 8 — Inheritance, virtual functions, vtables — and when NOT to use them
 
 Runtime (dynamic) polymorphism is a core OOP tool: one pointer to a base class, many possible derived
 behaviors chosen *at runtime*. It's also, in an HFT hot path, frequently the **wrong** tool. This
@@ -38,6 +38,55 @@ The vocabulary, precisely:
   overriding, so your "override" never gets called.
 - `= 0` makes a function **pure virtual**; a class with any pure virtual is **abstract** and cannot
   be instantiated (`Order o;` is an error) — it exists only to be derived from.
+
+### Public, protected, and private inheritance
+
+The inheritance access specifier controls how the base interface appears through the derived type:
+
+| Form | Base `public` becomes | Base `protected` becomes | Meaning |
+|---|---|---|---|
+| `class D : public B` | public | protected | substitutable **is-a** relationship |
+| `class D : protected B` | protected | protected | implementation mechanism |
+| `class D : private B` | private | private | implementation mechanism |
+
+Base `private` members are part of the derived object's base sub-object but remain inaccessible
+directly; derived code uses the base's protected/public interface. `class D : B` defaults to private
+inheritance, while `struct D : B` defaults to public. In normal application design, public
+inheritance is common and means “is-a”; composition is usually clearer than protected/private
+inheritance.
+
+Construction runs **base first, then members in declaration order, then the derived constructor
+body**. Destruction reverses that order. A derived constructor selects a base constructor in its
+initializer list:
+
+```cpp
+class LimitOrder : public Order {
+public:
+    LimitOrder(OrderId id, Price px) : Order{id}, price_{px} {}
+private:
+    Price price_;
+};
+```
+
+### Name hiding and `using`
+
+Declaring any derived function named `submit` hides *all* base overloads named `submit`, even those
+with different parameters:
+
+```cpp
+struct Base {
+    void submit(int);
+    void submit(std::string_view);
+};
+
+struct Derived : Base {
+    using Base::submit;               // re-expose the base overload set
+    void submit(const Order&);
+};
+```
+
+This is compile-time name lookup, separate from virtual overriding. Write `override` on every
+intended override so signature mistakes become compile errors.
 
 ---
 
@@ -100,7 +149,7 @@ That machinery has real, measurable costs at nanosecond scale:
 3. **Extra memory loads.** The vptr load + vtable load are two dependent loads on the critical path
    before the call can even start.
 4. **Cache pressure two ways.** The vptr **bloats every object by 8 bytes**, so fewer objects fit per
-   cache line (Module 15). And the vtables live *elsewhere* in memory, so an array of polymorphic
+   cache line (Module 16). And the vtables live *elsewhere* in memory, so an array of polymorphic
    objects scatters both data and dispatch targets.
 
 For a function called millions of times per second on the critical path, this is exactly the
@@ -110,10 +159,10 @@ difference between hitting and missing a latency budget. None of it matters off 
 
 ## 4. The alternatives HFT reaches for
 
-**1. Templates — compile-time polymorphism (Module 10).** Resolved at compile time, fully inlinable,
+**1. Templates — compile-time polymorphism (Module 12).** Resolved at compile time, fully inlinable,
 zero indirection. The first choice when the set of types is known at compile time.
 
-**2. CRTP — static polymorphism (Module 17).** Inheritance-*shaped* code with compile-time dispatch —
+**2. CRTP — static polymorphism (Module 19).** Inheritance-*shaped* code with compile-time dispatch —
 the base is templated on the derived type, so the "virtual" call becomes a `static_cast` resolved at
 compile time:
 
@@ -198,6 +247,50 @@ void take(const Order& o);   // correct: no slicing, polymorphism preserved
 
 ---
 
+## 8. RTTI and checked downcasts
+
+Run-time type information (RTTI) supports `typeid` and `dynamic_cast` for polymorphic types. A
+downcast asks whether a base pointer/reference really denotes a particular derived type:
+
+```cpp
+void inspect(Order* order) {
+    if (auto* limit = dynamic_cast<LimitOrder*>(order)) {
+        use_limit_price(limit->price());
+    }
+}
+```
+
+- Pointer failure returns `nullptr`; always check it.
+- Reference failure throws `std::bad_cast`.
+- The source type must be polymorphic (have at least one virtual function) for a checked downcast.
+- `dynamic_cast` can also adjust pointers correctly across multiple-inheritance sub-objects.
+
+RTTI is useful at plugin, diagnostic, or framework boundaries, but a chain of downcasts often says
+the interface is missing an operation. Prefer a virtual operation when behavior belongs to the open
+hierarchy, or `std::variant` + `std::visit` when the set of alternatives is closed and hot.
+
+`static_cast<Derived*>(base)` performs no runtime check. It is valid only when another invariant
+already proves the dynamic type. If that proof is wrong, using the result is UB.
+
+---
+
+## 9. Composition, virtual dispatch, and `variant`
+
+Choose based on the shape of the problem:
+
+- **composition** for “has-a” ownership and reusable implementation;
+- **virtual interface** for an open set of runtime-extensible implementations on a cold/moderate
+  path;
+- **`std::variant<A, B, C>`** for a closed set of alternatives where contiguous value storage and
+  exhaustive compile-time handling matter;
+- **templates/CRTP** when the concrete type is known at compile time and inlining matters.
+
+`std::any` is a more open type-erased box, but extraction requires knowing/checking the stored type,
+and larger values may allocate. It is suitable for dynamic configuration/plugin boundaries, not a
+default hot-path representation.
+
+---
+
 ## Common pitfalls & UB
 
 - **Missing virtual destructor** on a polymorphic base you `delete` through → UB / leaks (Section 6).
@@ -211,6 +304,11 @@ void take(const Order& o);   // correct: no slicing, polymorphism preserved
   `std::vector<std::unique_ptr<Order>>` (or a `variant`) to keep polymorphism.
 - **Storing polymorphic objects contiguously by value** to "help cache" — impossible; you must
   hold them via pointers, which re-introduces indirection. This is a core reason HFT uses `variant`.
+- **Unchecked `dynamic_cast` result** — a failed pointer cast is null; dereferencing it is UB.
+- **Using `static_cast` for an unproven downcast** — no runtime validation; a wrong dynamic type
+  produces invalid access.
+- **Assuming a derived overload adds to the base overload set** — it hides base functions with the
+  same name unless `using Base::name;` reintroduces them.
 
 ---
 
@@ -314,7 +412,7 @@ Squarepoint, Jump, HRT, NK Securities, Mansard.)*
 
 The matching hot path uses **no virtual functions**. Order type is encoded as an `enum` type tag with
 a `switch`, or the side is a template parameter (`BookSide<Side::Buy>`) so buy/sell dispatch is
-resolved at compile time. Orders are stored **contiguously by value** in a pool (Module 15) — only
+resolved at compile time. Orders are stored **contiguously by value** in a pool (Module 16) — only
 possible because they're not polymorphic — so the CPU prefetcher streams them with near-zero cache
 misses. Any genuine polymorphism (e.g. pluggable strategies in a backtester, or a logging/reporting
 sink) lives in the **cold configuration layer**, where a `virtual` interface or `std::function` costs
@@ -335,5 +433,5 @@ exactly the kind of systems judgement these desks probe for.
 - Never forget the **virtual destructor** on a polymorphic base (UB otherwise), always write
   `override`, and never pass polymorphic types by value (slicing).
 
-**Next:** [12 — The STL: containers, iterators, algorithms, complexity & cache](12-stl.md) — where
-the same "Big-O lies, cache decides" lesson governs every container choice.
+**Next:** [09 — RAII & the Rule of 0/3/5](09-raii-rule-of-five.md) — making resource ownership
+explicit and cleanup automatic.

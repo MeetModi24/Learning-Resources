@@ -1,4 +1,4 @@
-# Module 2 — Pointers & references
+# Module 3 — Pointers & references
 
 Two ways to refer to an object *indirectly*. Everything built later — data structures, function
 parameters, the entire order-book graph of price levels and linked orders — is built on these. A
@@ -10,7 +10,7 @@ interview questions, so this module builds both from the byte level up.
 
 ## 1. Every object has an address
 
-Recall from Module 1 that memory is a huge byte array and every byte has a numeric address. The
+Recall from Module 2 that memory is a huge byte array and every byte has a numeric address. The
 address-of operator `&` gives you the address where an object lives:
 
 ```cpp
@@ -106,7 +106,7 @@ address:      1000 1004 1008     (each int is 4 bytes)
              q    q+1  (advances 4 bytes, not 1)
 ```
 
-Walking contiguous memory this way is the basis of cache-friendly array traversal (Module 15) — the
+Walking contiguous memory this way is the basis of cache-friendly array traversal (Module 16) — the
 prefetcher loves the predictable, stride-`sizeof(T)` access pattern.
 
 ### `const` and pointers (read the declaration right-to-left)
@@ -220,7 +220,7 @@ Pass by value:                 Pass by const&:
 
 Linked lists, trees, and graphs need pointers because their links are *optional* (a leaf's child is
 null) and *reassignable* (splicing a node changes links). You cannot build them with references. For
-ownership, though, prefer smart pointers (Module 13) over raw pointers — raw pointers here mean
+ownership, though, prefer smart pointers (Module 14) over raw pointers — raw pointers here mean
 "non-owning observer."
 
 ---
@@ -230,7 +230,7 @@ ownership, though, prefer smart pointers (Module 13) over raw pointers — raw p
 - **Dereferencing null or a dangling pointer** — UB; often a crash, sometimes silent corruption.
 - **Confusing `int* p, q;`** — this declares `p` as `int*` and `q` as plain `int`. The `*` binds to
   the declarator, not the type. Declare one pointer per line to avoid it.
-- **Returning a pointer/reference to a local** (Module 1) — dangles.
+- **Returning a pointer/reference to a local** (Module 2) — dangles.
 - **Pointer arithmetic past the array bounds** — even *computing* `arr + n + 1` (one past "one past
   the end") is UB, let alone dereferencing it. `arr + n` (one-past-the-end) is legal to form but not
   to dereference.
@@ -261,7 +261,7 @@ sizeof(Node);   // ?
 ```
 **Answer:** `16`, not 12. `int` is 4 bytes, `Node*` is 8 bytes, but the pointer must be 8-byte
 aligned, so 4 bytes of padding are inserted after `v`. Layout: `[v:4][pad:4][next:8]`. (Alignment is
-Module 15.)
+Module 16.)
 
 **Q3.** Predict the output:
 ```cpp
@@ -367,16 +367,16 @@ Every reference-vs-pointer choice in the engine is deliberate:
 
 - **`const Order&`** to pass an order into a matching or validation function — cheap (one pointer),
   read-only, and the order definitely exists. This is the workhorse parameter across the codebase.
-- **Raw pointers (or 32-bit indices — Module 15)** to link resting orders in a doubly-linked list at
+- **Raw pointers (or 32-bit indices — Module 16)** to link resting orders in a doubly-linked list at
   each price level, and to hold `highestBuy` / `lowestSell` cursors. Links must be *nullable* (the
   head/tail of a level has no neighbor) and *re-seatable* (matching splices orders out), which is
   exactly what a reference cannot do. These raw pointers are **non-owning** — the object pool
-  (Module 3) owns the storage; the list just observes it.
+  (Module 4) owns the storage; the list just observes it.
 - **A hash map from order-ID → pointer** for O(1) cancel/modify lookup: given an incoming cancel for
   order 12345, jump straight to its node without scanning any level.
 
 Using 32-bit indices instead of 8-byte pointers for the links is a classic HFT micro-optimization
-(Module 15): it halves the link size, so more of the book fits in cache, and the "pointer" can't
+(Module 16): it halves the link size, so more of the book fits in cache, and the "pointer" can't
 outlive the pool. Every one of these is a conscious pointer-vs-reference-vs-index decision, and
 being able to justify each is exactly what the interview is checking.
 
@@ -397,6 +397,6 @@ being able to justify each is exactly what the interview is checking.
 - Use `nullptr` (typed) over `NULL`/`0` (integers) — it fixes overload resolution and template
   deduction.
 
-**Next:** [Module 3 — Dynamic memory (`new`/`delete`) & why the heap is slow](03-dynamic-memory.md)
+**Next:** [Module 4 — Dynamic memory (`new`/`delete`) & why the heap is slow](04-dynamic-memory.md)
 — giving objects a lifetime you control, and the object-pool trick that gives heap lifetime without
 heap latency.

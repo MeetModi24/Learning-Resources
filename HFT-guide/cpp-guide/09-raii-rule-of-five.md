@@ -1,4 +1,4 @@
-# Module 7 — RAII & the Rule of 0/3/5
+# Module 9 — RAII & the Rule of 0/3/5
 
 The single most important idiom in C++. Everything about safe resource handling flows from it. This
 module builds it up from the problem it solves, not from rules to memorize — because if you
@@ -90,7 +90,7 @@ void f(std::mutex& m) {
 ```
 
 The compiler emitted the destructor calls for you at *every* exit edge. That is the whole reason
-RAII and exceptions are a matched pair — Module 14 revisits this from the exception side.
+RAII and exceptions are a matched pair — Module 15 revisits this from the exception side.
 
 That's the entire idiom. Every RAII type is just "acquire in constructor, release in destructor." The
 ones you'll use constantly are already written for you:
@@ -164,7 +164,7 @@ Now **both** `a.data_` and `b.data_` hold `0xfff00` — they point at the *same*
 ```
 
 (And if `b` had modified "its" array, it would have silently modified `a`'s too — they're the same
-memory.) This is exactly the double-free / dangling bug from Module 3, reintroduced silently by a `=`
+memory.) This is exactly the double-free / dangling bug from Module 4, reintroduced silently by a `=`
 you didn't think twice about.
 
 **The core rule this leads to:** the moment your class owns a raw resource, the compiler's default
@@ -256,14 +256,14 @@ performance-critical code writes the manual version instead — know both.
 ### 4.4 & 4.5 Move constructor and move assignment — steal instead of copy
 
 Deep copies are correct but expensive (allocate + copy a million ints). When the source is a
-**temporary about to die** (an rvalue — Module 4) or something you've explicitly `std::move`'d,
+**temporary about to die** (an rvalue — Module 5) or something you've explicitly `std::move`'d,
 copying is wasteful: just **steal its pointer and null out the source** so its destructor frees
 nothing:
 
 ```cpp
 // 4. Move constructor
 Buffer(Buffer&& o) noexcept : data_{o.data_}, n_{o.n_} {  // take o's pointer
-    o.data_ = nullptr;  o.n_ = 0;                         // empty the source (Module 4)
+    o.data_ = nullptr;  o.n_ = 0;                         // empty the source (Module 5)
 }
 
 // 5. Move assignment — like move ctor, but free our own buffer first
@@ -290,7 +290,7 @@ after move:   a.data_ = nullptr                b.data_ ─▶ [heap 1000 ints]  
               (a's dtor now delete[] nullptr → harmless no-op)
 ```
 
-This is the shallow-copy-plus-null-out from Module 4 — the thing a raw shallow copy got *wrong* is
+This is the shallow-copy-plus-null-out from Module 5 — the thing a raw shallow copy got *wrong* is
 now correct precisely *because* we empty the source, so only one object ends up owning the buffer.
 
 ### The Rule of Five, stated
@@ -383,7 +383,7 @@ would be a correctness disaster.
 - **Half-and-half rule violation:** writing a copy ctor but leaving default copy assign (or vice
   versa) — they must be consistent or you get one deep and one shallow path.
 - **Using a moved-from object as if it still owns its resource** — after `std::move(x)`, `x` is
-  *valid but unspecified*; only destroy it or assign a fresh value to it (Module 9).
+  *valid but unspecified*; only destroy it or assign a fresh value to it (Module 11).
 
 ---
 
@@ -574,7 +574,7 @@ part right once.
 
 ## 9. In the order book
 
-- `OrderPool` (Module 3) is a **Rule-of-Five** type: it owns a big buffer, must **not** be copied
+- `OrderPool` (Module 4) is a **Rule-of-Five** type: it owns a big buffer, must **not** be copied
   (`=delete` the copy operations — two pools sharing one slab would be chaos), and can be moved
   (`noexcept` move so a `std::vector<OrderPool>` or a resize wouldn't copy the slab). It's exactly the
   low-level wrapper where you write the special members by hand.
@@ -604,4 +604,4 @@ Rule-of-Zero everywhere above it.
 - **Rule of Zero is the default**: compose RAII members and write none of the five. Rule of Five only
   for the rare low-level wrapper. `=delete` to forbid copies; `=default` to opt back in.
 
-**Next:** [08 — Operator overloading & value semantics](08-operator-overloading.md)
+**Next:** [10 — Operator overloading & value semantics](10-operator-overloading.md)

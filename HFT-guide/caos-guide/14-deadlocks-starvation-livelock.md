@@ -389,7 +389,7 @@ HFT's tick-to-trade path **eliminates the possibility** by removing shared mutab
 - **Single-threaded ownership** — the matching engine owns its data; with no shared lock there is no
   deadlock, no priority inversion, no livelock on that path.
 - **Lock-free SPSC queues** — threads hand data off without locks, so no cycle can form and latency
-  stays bounded ([`../cpp-guide/16`](../cpp-guide/16-atomics-lockfree.md)).
+  stays bounded ([`../cpp-guide/18`](../cpp-guide/18-atomics-lockfree.md)).
 - **Immutability / `thread_local`** — data never shared-and-mutated needs no coordination.
 
 The interview summary: *deadlock, starvation, priority inversion and livelock are all liveness bugs of

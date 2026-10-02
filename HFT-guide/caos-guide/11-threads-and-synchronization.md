@@ -8,7 +8,7 @@ its lifecycle (`join`/`detach` and friends), and how synchronization primitives 
 mutex — actually work underneath. The C++-API angle lives in
 [`../../guide-os-net/02`](../../guide-os-net/02-multithreading.md) and
 [`../../guide-os-net/03`](../../guide-os-net/03-cross-thread-safety.md); the lock-free/atomic side is in
-[`../cpp-guide/16`](../cpp-guide/16-atomics-lockfree.md). Here we go under the API to the kernel mechanism.
+[`../cpp-guide/18`](../cpp-guide/18-atomics-lockfree.md). Here we go under the API to the kernel mechanism.
 
 ---
 
@@ -154,7 +154,7 @@ The takeaways interviewers want:
   context switch out, Module 10), and later wakes it (another switch). Now you're paying microseconds
   plus cold caches. Contention, not locking, is the cost.
 - This is why HFT hot paths **avoid contention entirely** rather than "avoid mutexes" — a single-
-  threaded matcher fed by a lock-free SPSC queue ([`../cpp-guide/16`](../cpp-guide/16-atomics-lockfree.md)) has
+  threaded matcher fed by a lock-free SPSC queue ([`../cpp-guide/18`](../cpp-guide/18-atomics-lockfree.md)) has
   no shared mutable state and thus no locks at all.
 
 ---
@@ -310,7 +310,7 @@ Semaphores also build the classic **bounded-buffer producer/consumer**: two coun
 ```
 
 This is correct and portable, but note the hot-path alternative: a **lock-free SPSC ring** (§10's
-message-passing stance, [`../cpp-guide/16`](../cpp-guide/16-atomics-lockfree.md)) does the same
+  message-passing stance, [`../cpp-guide/18`](../cpp-guide/18-atomics-lockfree.md)) does the same
 bounded hand-off with no mutex and no kernel wait — which is why the semaphore version lives in the
 control plane (backtest feeders, connection pools) and the ring lives on the tick-to-trade path.
 
@@ -352,7 +352,7 @@ Every primitive above has a cost, and the fastest synchronization is **none**. H
 lean on:
 
 - **Single-threaded hot path** — the matching engine owns its data exclusively; no locks, always
-  cache-hot, deterministic ([`../cpp-guide/16`](../cpp-guide/16-atomics-lockfree.md)).
+  cache-hot, deterministic ([`../cpp-guide/18`](../cpp-guide/18-atomics-lockfree.md)).
 - **Message passing over shared state** — hand data between threads through a **lock-free SPSC queue**
   rather than sharing a structure behind a mutex. No contention, bounded latency.
 - **Immutability & `thread_local`** — data never written after publication needs no locks;

@@ -1,4 +1,4 @@
-# Module 18 — C++20 features that matter (for HFT and this project)
+# Module 20 — C++20 features that matter (for HFT and this project)
 
 Your resume says **C++20**. In an interview that is a promise you must be able to defend — "I set
 the `-std=c++20` flag" won't survive the first follow-up. This module walks the C++20 additions that
@@ -13,7 +13,7 @@ features, say what problem each solves, and describe exactly where you used it.
 Before C++20, a template accepted *any* type and only failed deep inside instantiation, producing
 the infamous 200-line error walls. **Concepts** let you state, up front, what a type must support —
 turning those errors into a clear "this type doesn't satisfy `PriceLike`" at the call site. (Full
-treatment in Module 10; here's the HFT-relevant summary.)
+treatment in Module 12; here's the HFT-relevant summary.)
 
 ```cpp
 #include <concepts>
@@ -33,7 +33,7 @@ void insert(P price);                // only accepts types that are ordered AND 
 get a one-line diagnostic, not a template avalanche. Second, and more importantly, concepts let you
 **encode invariants the domain requires**: a `Price` type *must* be totally ordered (you sort the
 book by it) and *should* be trivially copyable (you `memcpy` orders through queues and pools —
-Module 15). Constraining on `is_trivially_copyable_v` catches, at compile time, someone accidentally
+Module 16). Constraining on `is_trivially_copyable_v` catches, at compile time, someone accidentally
 giving `Price` a `std::string` member that would silently break the pooling/queueing assumptions.
 
 ---
@@ -81,7 +81,7 @@ int bestLevel = std::countr_zero(occupied);   // one instruction — no tree wal
 This is the mechanism behind the "27M orders/sec" style designs referenced in the research doc: an
 `std::map` finds the best price by walking to the tree's leftmost node (pointer chasing, cache
 misses, ~log n); the bitset does it in one `countr_zero`. `has_single_bit` / `bit_ceil` are also how
-you size ring buffers to a power of two so `& (N-1)` replaces `% N` (Module 16).
+you size ring buffers to a power of two so `& (N-1)` replaces `% N` (Module 18).
 
 ---
 
@@ -116,7 +116,7 @@ process({v.data() + 10, 32});  // a 32-element slice, still zero copy
 zero-copy parsing — a feed-handler staple. You view directly into the network buffer without copying
 bytes, and `span` carries the length so you can't walk off the end the way a bare pointer lets you.
 Use `std::span<const T>` for read-only views. Caveat: a span is a *borrow* — never return one that
-outlives the buffer it points into (dangling-view UB, the same trap as `string_view`, Module 4/12).
+outlives the buffer it points into (dangling-view UB, the same trap as `string_view`, Modules 5/13).
 
 ---
 
@@ -150,7 +150,7 @@ be measured about the matching loop.
 
 Before C++20, giving a type all six relational operators (`<`, `<=`, `>`, `>=`, `==`, `!=`) meant
 writing them by hand — tedious and easy to get inconsistent. The **spaceship operator** generates
-them all from one defaulted line (Module 8):
+them all from one defaulted line (Module 10):
 
 ```cpp
 struct Price {
@@ -178,13 +178,13 @@ in the book, and it guarantees the six operators stay mutually consistent — no
 - **Expanded `constexpr`** — C++20 lets far more run at compile time, including `constexpr` dynamic
   allocation and `std::vector`/`std::string` inside `constexpr` functions. Use it to precompute
   lookup tables, price-scaling constants, or masks entirely at compile time so they cost nothing at
-  runtime (Module 5/17).
+  runtime (Modules 6/19).
 
 ---
 
 ## 7. `[[likely]]` / `[[unlikely]]` — branch-probability hints (★ usable)
 
-Covered in Module 17. C++20 standardizes the hint that tells the compiler which side of a branch is
+Covered in Module 19. C++20 standardizes the hint that tells the compiler which side of a branch is
 the common case, so it lays out the hot path linearly (better i-cache behavior, better default
 prediction):
 
@@ -226,7 +226,7 @@ calls `std::terminate`. `std::jthread` (C++20) fixes both problems:
 }   // destructor auto-requests stop AND joins — no manual cleanup, no terminate risk
 ```
 
-It's **RAII for threads** (Module 7): the destructor requests cooperative cancellation via a
+It's **RAII for threads** (Modules 9 and 17): the destructor requests cooperative cancellation via a
 `std::stop_token` and then joins. For a feed-handler or logging thread that must shut down cleanly,
 this removes an entire class of bugs.
 
@@ -248,7 +248,7 @@ allocation-free, so I didn't use them here."
 - **Modules** (`import`/`export`) — replace textual `#include` with a compiled interface for faster,
   cleaner builds; toolchain support is still maturing, so mention you know them but that build
   support varies.
-- **`consteval`** (Module 5) — "immediate functions" that *must* run at compile time (stronger than
+- **`consteval`** (Module 6) — "immediate functions" that *must* run at compile time (stronger than
   `constexpr`, which merely *may*).
 - **`<chrono>` calendar & time-zone support** — civil dates and time zones in the standard library,
   useful for session/timestamp handling.
@@ -322,7 +322,7 @@ representing prices as integer **ticks** (`std::int64_t`), which yield `strong_o
 
 ---
 
-**Q5.** Write a concept `Poolable` that a type must satisfy to live in the object pool from Module 3
+**Q5.** Write a concept `Poolable` that a type must satisfy to live in the object pool from Module 4
 (must be trivially copyable and default-constructible), and constrain a pool template on it.
 
 **Answer:**
@@ -347,7 +347,7 @@ must be true of `N`, and why is it faster?
 **Answer:** If `N` is a power of two, `x % N` equals `x & (N - 1)`. You can assert the precondition
 with `static_assert(std::has_single_bit(N));`, or size a buffer up with `std::bit_ceil(requested)`.
 It's faster because a bitwise AND is one cycle, whereas integer division/modulo is many cycles (and
-often not pipelined). This is exactly why the SPSC ring buffer (Module 16) uses power-of-two capacity.
+often not pipelined). This is exactly why the SPSC ring buffer (Module 18) uses power-of-two capacity.
 
 ---
 
