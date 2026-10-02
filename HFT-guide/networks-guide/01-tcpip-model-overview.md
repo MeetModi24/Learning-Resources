@@ -86,8 +86,8 @@ machine, and the **application protocol** tells that program what the bytes mean
 ### The application layer and "roll your own"
 
 The application layer is where the bytes finally mean something. HTTP, DNS, SMTP are the public examples.
-But the sentence from the source material that matters most for us: **"A lot of real-world low-latency
-programming requires you to create your own protocols."** Exchanges don't send you JSON over HTTP — they
+But the point that matters most for us: **a lot of real-world low-latency programming means building
+your own application protocol.** Exchanges don't send you JSON over HTTP — they
 send tight **binary** messages (fixed-width fields, no parsing, no text) over UDP multicast, because every
 byte and every parse step is latency. Your feed handler ([infra Module 02](../hft-infrastructure-guide/02-feed-handler.md))
 *is* an application-layer protocol implementation. Designing that wire format — fixed offsets, little vs
@@ -146,8 +146,8 @@ way *up* — **decapsulation**.
         bits on the wire                                  "bits / symbols"
 ```
 
-Each header is literally "the function arguments the next hop needs to see." The source material frames it
-well: you can't just send `sendData(src, dst, data, len)` as a bare call across the world — the far side
+Each header is literally "the function arguments the next hop needs to see." Think of it this way:
+you can't just send `sendData(src, dst, data, len)` as a bare call across the world — the far side
 and every router in between must be able to *read* src/dst, so you serialize those arguments into bytes at
 the front of the message. That's all a header is: the layer's parameters, on the wire.
 
